@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infraestructura de Climatización DCSM</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: { 850: '#151e2e', 900: '#0f172a', 950: '#020617' },
+                        brand: { blue: '#3b82f6', ok: '#10b981', alert: '#f59e0b', danger: '#ef4444' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; transition: all 0.2s; }
+        .card:hover { border-color: #475569; }
+        
+        .kpi-card { cursor: pointer; position: relative; overflow: hidden; }
+        .kpi-card.active { border-color: #3b82f6; box-shadow: 0 0 15px rgba(59, 130, 246, 0.2); }
+        .kpi-card.active::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background-color: #3b82f6; }
+        
+        .status-badge { padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .badge-ok { background-color: rgba(16, 185, 129, 0.15); color: #34d399; }
+        .badge-alert { background-color: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+        .badge-danger { background-color: rgba(239, 68, 68, 0.15); color: #f87171; }
+        
+        .eq-row:hover { background-color: rgba(255, 255, 255, 0.05); cursor: pointer; }
+        
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        
+        .fan-icon { transition: color 0.3s ease, transform 0.1s ease; cursor: pointer; }
+        .fan-icon:active { transform: scale(0.95); }
+
+        
+        .table-container { max-height: 550px; overflow-y: auto; }
+        thead th { position: sticky; top: 0; background-color: #1e293b; z-index: 10; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+
+        select {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+            background-position: right 0.75rem center;
+            background-repeat: no-repeat;
+            background-size: 1.25em 1.25em;
+        }
+
+        /* Modal Overlay Transition */
+        #modalOverlay { backdrop-filter: blur(4px); }
+    </style>
+</head>
+<body class="p-4 md:p-6 lg:p-8 relative">
+
+    <header class="mb-8 border-b border-slate-700 pb-6 flex flex-col md:flex-row justify-between items-center gap-4">
+        <div>
+            <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-300 uppercase tracking-wide">
+                <i class="fa-solid fa-server mr-2 text-blue-400"></i> Infraestructura de Climatización DCSM
+            </h1>
+            <p class="text-slate-400 mt-1 uppercase text-sm tracking-wider">Sistema de Análisis Operacional & Base de Datos</p>
+        </div>
+        <!-- HEADER BUTTONS REPLACED HERE -->
+        <div class="flex gap-2">
+            <button onclick="openAddAssetModal()" title="Ingresar Nuevo Activo" class="w-10 h-10 bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-lg shadow-blue-500/20 transition flex items-center justify-center border border-blue-500">
+                <i class="fa-solid fa-plus"></i>
+            </button>
+            <button onclick="resetFilters()" title="Limpiar Filtros" class="w-10 h-10 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-600 transition flex items-center justify-center shadow-sm">
+                <i class="fa-solid fa-filter-circle-xmark"></i>
+            </button>
+            <button onclick="exportToExcel()" title="Descargar Excel" class="w-10 h-10 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition flex items-center justify-center shadow-lg shadow-emerald-500/20 border border-emerald-500">
+                <i class="fa-solid fa-file-excel"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Panel de KPIs Principales -->
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-8" id="kpi-container">
+        <!-- Generados por JS -->
+    </div>
+
+    <!-- Sección Analítica (Gráficos) -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <!-- Estatus General -->
+        <div class="card p-5">
+            <h3 class="text-sm font-semibold mb-4 text-slate-300 border-b border-slate-700 pb-2 uppercase tracking-wider flex justify-between items-center">
+                <span>Estatus General</span>
+                <i class="fa-solid fa-chart-pie text-slate-500"></i>
+            </h3>
+            <div class="relative h-48 w-full flex justify-center items-center">
+                <canvas id="chartStatus"></canvas>
+            </div>
+            <div class="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
+                <div class="bg-slate-800 rounded p-2 border border-slate-700"><span class="block text-emerald-400 font-bold text-lg" id="stat-ok">0</span> Operativos</div>
+                <div class="bg-slate-800 rounded p-2 border border-slate-700"><span class="block text-amber-400 font-bold text-lg" id="stat-alert">0</span> En Alerta</div>
+                <div class="bg-slate-800 rounded p-2 border border-slate-700"><span class="block text-rose-400 font-bold text-lg" id="stat-fail">0</span> F/S</div>
+            </div>
+        </div>
+
+        <!-- Gráfico Top Tipos de Falla -->
+        <div class="card p-5 lg:col-span-2">
+            <h3 class="text-sm font-semibold mb-4 text-slate-300 border-b border-slate-700 pb-2 uppercase tracking-wider flex justify-between items-center">
+                <span>Análisis de Tipología de Anomalías</span>
+                <i class="fa-solid fa-chart-bar text-slate-500"></i>
+            </h3>
+            <div class="relative h-60 w-full">
+                <canvas id="chartFaults"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Buscador y Filtros -->
+    <div class="card p-4 mb-6 flex flex-col xl:flex-row gap-4 justify-between items-center bg-slate-800/50">
+        <div class="flex flex-col md:flex-row gap-4 w-full">
+            <!-- Filtro por Sala -->
+            <div class="relative w-full md:w-64">
+                <select id="filterRoom" onchange="state.room = this.value; aplicarFiltros()" class="w-full bg-slate-900 border border-slate-600 text-slate-300 rounded-lg pl-3 pr-10 py-2 focus:outline-none focus:border-blue-500 transition text-sm font-medium">
+                    <option value="ALL">Todas las Ubicaciones / Salas</option>
+                </select>
+            </div>
+
+            <!-- Filtro Desplegable de Anomalías (NUEVO) -->
+            <div class="relative w-full md:w-64">
+                <select id="filterFault" onchange="state.falla = this.value; aplicarFiltros()" class="w-full bg-slate-900 border border-slate-600 text-slate-300 rounded-lg pl-3 pr-10 py-2 focus:outline-none focus:border-amber-500 transition text-sm font-medium">
+                    <option value="ALL">Todas las Anomalías / Estatus</option>
+                    <option value="COMPRESOR">⚠️ Falla en Compresores</option>
+                    <option value="FUGA">⚠️ Fugas / Refrigerante</option>
+                    <option value="MOTOR">⚠️ Motores / Ventiladores</option>
+                    <option value="OTROS">⚠️ Otras Observaciones</option>
+                </select>
+            </div>
+
+            <!-- Buscador Libre -->
+            <div class="relative w-full md:flex-grow max-w-lg">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 text-sm"></i>
+                <input type="text" id="searchInput" placeholder="Búsqueda libre: TAG, Marca, Modelo, S/N..." class="w-full bg-slate-900 border border-slate-600 text-white rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:border-blue-500 transition text-sm">
+            </div>
+        </div>
+    </div>
+
+    <div class="text-sm text-slate-400 mb-2 px-1 flex justify-between">
+        <span id="results-count" class="font-medium text-slate-300">Mostrando 0 equipos</span>
+        <span class="text-slate-500 text-xs italic"><i class="fa-solid fa-hand-pointer mr-1"></i> Clic sobre un equipo para visualizar ficha técnica</span>
+    </div>
+
+    <!-- Tabla Detallada (FORMATO ANTERIOR) -->
+    <div class="card overflow-hidden">
+        <div class="table-container">
+            <table class="w-full text-left text-sm whitespace-nowrap">
+                <thead class="text-xs text-slate-400 uppercase bg-slate-800/80">
+                    <tr>
+                        <th class="px-6 py-4 cursor-pointer hover:text-white transition" onclick="sortData('tag')">TAG <i class="fa-solid fa-sort ml-1"></i></th>
+                        <th class="px-6 py-4 cursor-pointer hover:text-white transition" onclick="sortData('tipo')">Clase <i class="fa-solid fa-sort ml-1"></i></th>
+                        <th class="px-6 py-4 cursor-pointer hover:text-white transition" onclick="sortData('ubicacion')">Ubicación <i class="fa-solid fa-sort ml-1"></i></th>
+                        <th class="px-6 py-4">Marca / Modelo</th>
+                        <th class="px-6 py-4 text-center cursor-pointer hover:text-white transition" onclick="sortData('estado')">Estado <i class="fa-solid fa-sort ml-1"></i></th>
+                        <th class="px-6 py-4">Diagnóstico Integral</th>
+                    </tr>
+                </thead>
+                <tbody id="table-body" class="divide-y divide-slate-700/50">
+                    <!-- Generado por JS -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- MODAL POPUP FICHA TÉCNICA -->
+    <div id="modalOverlay" class="fixed inset-0 bg-slate-950/80 z-50 hidden flex items-center justify-center p-4 transition-opacity">
+        <div class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col relative overflow-hidden">
+            
+            <!-- Modal Header -->
+            <div class="bg-slate-800 p-5 border-b border-slate-700 flex justify-between items-center">
+                <div class="flex items-center gap-4">
+                    <div id="modalIcon" class="w-12 h-12 rounded-lg bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-400 text-xl">
+                        <i class="fa-solid fa-server"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-black text-white tracking-wide uppercase" id="modalTag">TAG-AQUI</h2>
+                        <p class="text-slate-400 text-sm font-medium" id="modalTipo">Tipo de Equipo</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3" id="modalHeaderControls">
+                    <!-- REPLACED: Dropdown for Status -->
+                    <div class="flex items-center bg-slate-900 border border-slate-600 rounded-lg overflow-hidden">
+                        <div class="px-3 py-2 bg-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider border-r border-slate-600">Estatus</div>
+                        <select id="editEstadoManual" class="bg-transparent text-white text-xs font-bold px-3 py-2 outline-none focus:border-blue-500 cursor-pointer">
+                            <option value="AUTO" class="bg-slate-800">Auto (Basado en Obs.)</option>
+                            <option value="OK" class="bg-slate-800 text-emerald-400">Forzar OPERATIVO</option>
+                            <option value="ALERT" class="bg-slate-800 text-amber-400">Forzar ALERTA</option>
+                            <option value="FAIL" class="bg-slate-800 text-rose-400">Forzar F/S</option>
+                        </select>
+                    </div>
+                    <button onclick="closeModal()" class="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 w-10 h-10 rounded-full flex items-center justify-center transition border border-slate-600">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Modal Body (Scrollable) -->
+            <div class="p-6 overflow-y-auto custom-scrollbar flex-grow bg-[#0b1120]">
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <!-- Sección de Identificación -->
+                    <div class="bg-slate-800/60 rounded-lg border border-slate-700 p-4">
+                        <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400 border-b border-slate-700/50 pb-2 mb-3"><i class="fa-solid fa-id-card mr-1"></i> Especificaciones Generales</h4>
+                        <table class="w-full text-sm">
+                            <tr class="border-b border-slate-700/30"><td class="py-2 text-slate-500 w-1/3">Ubicación</td><td class="py-2 text-white font-medium" id="modalUbicacion">...</td></tr>
+                            <tr class="border-b border-slate-700/30"><td class="py-2 text-slate-500">Fabricante</td><td class="py-2 text-white font-medium" id="modalMarca">...</td></tr>
+                            <tr class="border-b border-slate-700/30"><td class="py-2 text-slate-500">Modelo</td><td class="py-2 text-white font-medium" id="modalModelo">...</td></tr>
+                            <tr><td class="py-2 text-slate-500">Número de Serie</td><td class="py-2 text-white font-mono tracking-wider" id="modalSerie">...</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Unidad Condensadora (UE) -->
+                    <div class="bg-slate-800/60 rounded-lg border border-slate-700 p-4 flex flex-col">
+                        <div class="flex justify-between items-center border-b border-slate-700/50 pb-2 mb-3">
+                            <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400"><i class="fa-solid fa-fan mr-1"></i> Unidad Condensadora (UE)</h4>
+                            <span class="bg-slate-700 text-slate-300 text-[9px] font-bold py-0.5 px-2 rounded border border-slate-600">4 Vent.</span>
+                        </div>
+                        
+                        <!-- Ventiladores -->
+                        <div class="mb-3">
+                            <div class="flex justify-between items-center mb-1.5">
+                                <span class="text-slate-500 text-[9px] font-bold uppercase">Estatus Operativo</span>
+                                <span class="text-slate-600 text-[8px] italic">*Clic para cambiar</span>
+                            </div>
+                            <div class="flex justify-around items-center bg-slate-900/50 rounded p-3 border border-slate-700/50">
+                                <!-- V1 -->
+                                <div class="flex flex-col items-center gap-1">
+                                    <svg id="fan1" onclick="cycleStatus('fan1')" class="fan-icon w-8 h-8 text-gray-500 hover:opacity-80" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M12,11A1,1 0 0,0 11,12A1,1 0 0,0 12,13A1,1 0 0,0 13,12A1,1 0 0,0 12,11M12.5,2C17,2 17.11,5.57 14.75,6.75C13.56,7.35 12.5,6.9 12.5,6.9C12.5,6.9 14.39,8.59 13.92,10.09C13.59,11.13 12.8,11.45 12.8,11.45C12.8,11.45 15.56,10.15 16.5,10.42C17.9,10.82 18.25,12.82 17.07,13.88C15.9,14.93 14.75,14.07 14.75,14.07C14.75,14.07 15.08,16.5 13.87,17.41C12.5,18.44 10.6,17.5 10.6,17.5C10.6,17.5 10.19,20.45 8.78,20.45C7.38,20.45 6.6,18 7.94,16.63C9.27,15.26 10.5,15.7 10.5,15.7C10.5,15.7 8.56,13.78 8.89,12.42C9.22,11.06 10.32,10.5 10.32,10.5C10.32,10.5 7.42,11.75 6.47,11.33C5,10.73 4.79,8.71 6,7.74C7.22,6.77 8.35,7.5 8.35,7.5C8.35,7.5 7.94,5.06 9.14,4.22C10.35,3.37 12.5,4.35 12.5,4.35C12.5,4.35 12.5,2 12.5,2Z" />
+                                    </svg>
+                                    <span class="text-[9px] text-slate-500 font-bold">V1</span>
+                                </div>
+                                <!-- V2 -->
+                                <div class="flex flex-col items-center gap-1">
+                                    <svg id="fan2" onclick="cycleStatus('fan2')" class="fan-icon w-8 h-8 text-gray-500 hover:opacity-80" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M12,11A1,1 0 0,0 11,12A1,1 0 0,0 12,13A1,1 0 0,0 13,12A1,1 0 0,0 12,11M12.5,2C17,2 17.11,5.57 14.75,6.75C13.56,7.35 12.5,6.9 12.5,6.9C12.5,6.9 14.39,8.59 13.92,10.09C13.59,11.13 12.8,11.45 12.8,11.45C12.8,11.45 15.56,10.15 16.5,10.42C17.9,10.82 18.25,12.82 17.07,13.88C15.9,14.93 14.75,14.07 14.75,14.07C14.75,14.07 15.08,16.5 13.87,17.41C12.5,18.44 10.6,17.5 10.6,17.5C10.6,17.5 10.19,20.45 8.78,20.45C7.38,20.45 6.6,18 7.94,16.63C9.27,15.26 10.5,15.7 10.5,15.7C10.5,15.7 8.56,13.78 8.89,12.42C9.22,11.06 10.32,10.5 10.32,10.5C10.32,10.5 7.42,11.75 6.47,11.33C5,10.73 4.79,8.71 6,7.74C7.22,6.77 8.35,7.5 8.35,7.5C8.35,7.5 7.94,5.06 9.14,4.22C10.35,3.37 12.5,4.35 12.5,4.35C12.5,4.35 12.5,2 12.5,2Z" />
+                                    </svg>
+                                    <span class="text-[9px] text-slate-500 font-bold">V2</span>
+                                </div>
+                                <!-- V3 -->
+                                <div class="flex flex-col items-center gap-1">
+                                    <svg id="fan3" onclick="cycleStatus('fan3')" class="fan-icon w-8 h-8 text-gray-500 hover:opacity-80" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M12,11A1,1 0 0,0 11,12A1,1 0 0,0 12,13A1,1 0 0,0 13,12A1,1 0 0,0 12,11M12.5,2C17,2 17.11,5.57 14.75,6.75C13.56,7.35 12.5,6.9 12.5,6.9C12.5,6.9 14.39,8.59 13.92,10.09C13.59,11.13 12.8,11.45 12.8,11.45C12.8,11.45 15.56,10.15 16.5,10.42C17.9,10.82 18.25,12.82 17.07,13.88C15.9,14.93 14.75,14.07 14.75,14.07C14.75,14.07 15.08,16.5 13.87,17.41C12.5,18.44 10.6,17.5 10.6,17.5C10.6,17.5 10.19,20.45 8.78,20.45C7.38,20.45 6.6,18 7.94,16.63C9.27,15.26 10.5,15.7 10.5,15.7C10.5,15.7 8.56,13.78 8.89,12.42C9.22,11.06 10.32,10.5 10.32,10.5C10.32,10.5 7.42,11.75 6.47,11.33C5,10.73 4.79,8.71 6,7.74C7.22,6.77 8.35,7.5 8.35,7.5C8.35,7.5 7.94,5.06 9.14,4.22C10.35,3.37 12.5,4.35 12.5,4.35C12.5,4.35 12.5,2 12.5,2Z" />
+                                    </svg>
+                                    <span class="text-[9px] text-slate-500 font-bold">V3</span>
+                                </div>
+                                <!-- V4 -->
+                                <div class="flex flex-col items-center gap-1">
+                                    <svg id="fan4" onclick="cycleStatus('fan4')" class="fan-icon w-8 h-8 text-gray-500 hover:opacity-80" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M12,11A1,1 0 0,0 11,12A1,1 0 0,0 12,13A1,1 0 0,0 13,12A1,1 0 0,0 12,11M12.5,2C17,2 17.11,5.57 14.75,6.75C13.56,7.35 12.5,6.9 12.5,6.9C12.5,6.9 14.39,8.59 13.92,10.09C13.59,11.13 12.8,11.45 12.8,11.45C12.8,11.45 15.56,10.15 16.5,10.42C17.9,10.82 18.25,12.82 17.07,13.88C15.9,14.93 14.75,14.07 14.75,14.07C14.75,14.07 15.08,16.5 13.87,17.41C12.5,18.44 10.6,17.5 10.6,17.5C10.6,17.5 10.19,20.45 8.78,20.45C7.38,20.45 6.6,18 7.94,16.63C9.27,15.26 10.5,15.7 10.5,15.7C10.5,15.7 8.56,13.78 8.89,12.42C9.22,11.06 10.32,10.5 10.32,10.5C10.32,10.5 7.42,11.75 6.47,11.33C5,10.73 4.79,8.71 6,7.74C7.22,6.77 8.35,7.5 8.35,7.5C8.35,7.5 7.94,5.06 9.14,4.22C10.35,3.37 12.5,4.35 12.5,4.35C12.5,4.35 12.5,2 12.5,2Z" />
+                                    </svg>
+                                    <span class="text-[9px] text-slate-500 font-bold">V4</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Controles -->
+                        <div class="grid grid-cols-2 gap-3 mt-auto">
+                            <div>
+                                <label class="text-[9px] text-slate-400 font-bold uppercase mb-1 block">Tipo de Motor</label>
+                                <select id="ueMotor" class="w-full bg-slate-900 border border-slate-600 text-slate-200 text-xs rounded p-1.5 focus:border-blue-500 outline-none cursor-pointer">
+                                    <option value="" disabled selected>Seleccione...</option>
+                                    <option value="220v/630mm">220v/630mm</option>
+                                    <option value="380v/630mm">380v/630mm</option>
+                                    <option value="220v/350mm">220v/350mm</option>
+                                    <option value="220v/450mm">220v/450mm</option>
+                                    <option value="220v/500mm">220v/500mm</option>
+                                    <option value="380v/500mm">380v/500mm</option>
+                                    <option value="220v/600mm">220v/600mm</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-[9px] text-slate-400 font-bold uppercase mb-1 block">Control</label>
+                                <select id="ueControl" class="w-full bg-slate-900 border border-slate-600 text-slate-200 text-xs rounded p-1.5 focus:border-blue-500 outline-none cursor-pointer">
+                                    <option value="" disabled selected>Seleccione...</option>
+                                    <option value="Directo">Directo</option>
+                                    <option value="Fan Speed">Fan Speed</option>
+                                    <option value="KP5">KP5</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Desglose de Estado Operacional -->
+                <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400 border-b border-slate-700/50 pb-2 mb-4"><i class="fa-solid fa-stethoscope mr-1"></i> Diagnóstico Operacional & Componentes (EDITABLE)</h4>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="modalDiagnosticBlocks">
+                    <!-- Generado dinámicamente -->
+                </div>
+            </div>
+            
+            <!-- Modal Footer REPLACED HERE -->
+            <div class="bg-slate-800 p-4 border-t border-slate-700 flex justify-between items-center">
+                <span class="text-[11px] text-slate-500 italic">* Los cambios realizados modificarán el panel al guardar.</span>
+                <div class="flex gap-2">
+                    <button onclick="closeModal()" class="px-5 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium rounded-lg transition border border-slate-600 shadow-sm">
+                        Cancelar
+                    </button>
+                    <button onclick="saveModalChanges()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition shadow-sm border border-emerald-500 flex items-center gap-2">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar Cambios
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL NUEVO ACTIVO -->
+    <div id="modalAddAsset" class="fixed inset-0 bg-slate-950/80 z-50 hidden flex items-center justify-center p-4 transition-opacity">
+        <div class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl flex flex-col relative overflow-hidden">
+            <div class="bg-slate-800 p-5 border-b border-slate-700 flex justify-between items-center">
+                <h2 class="text-xl font-black text-white tracking-wide uppercase">
+                    <i class="fa-solid fa-plus text-blue-400 mr-2"></i> Ingresar Nuevo Activo
+                </h2>
+                <button onclick="closeAddAssetModal()" class="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 w-8 h-8 rounded-full flex items-center justify-center transition border border-slate-600">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-6 bg-[#0b1120] grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="text-xs text-slate-400 font-bold uppercase mb-1 block">TAG del Equipo *</label>
+                    <input type="text" id="newTag" class="w-full bg-slate-800 border border-slate-600 text-white rounded-lg p-2 text-sm focus:border-blue-500 outline-none transition-colors" placeholder="Ej. CRAC-01">
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400 font-bold uppercase mb-1 block">Clase / Tipo</label>
+                    <select id="newTipo" class="w-full bg-slate-800 border border-slate-600 text-white rounded-lg p-2 text-sm focus:border-blue-500 outline-none transition-colors">
+                        <option value="CRAC">CRAC</option>
+                        <option value="CRAH">CRAH</option>
+                        <option value="CONFORT">CONFORT</option>
+                        <option value="CHILLER">CHILLER</option>
+                        <option value="BOMBA">BOMBA</option>
+                        <option value="TORRE DE ENFRIAMIENTO">TORRE DE ENFRIAMIENTO</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400 font-bold uppercase mb-1 block">Ubicación / Sala *</label>
+                    <input type="text" id="newUbicacion" class="w-full bg-slate-800 border border-slate-600 text-white rounded-lg p-2 text-sm focus:border-blue-500 outline-none transition-colors" placeholder="Ej. Sala TIC">
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400 font-bold uppercase mb-1 block">Marca</label>
+                    <input type="text" id="newMarca" class="w-full bg-slate-800 border border-slate-600 text-white rounded-lg p-2 text-sm focus:border-blue-500 outline-none transition-colors" placeholder="Ej. LIEBERT">
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400 font-bold uppercase mb-1 block">Modelo</label>
+                    <input type="text" id="newModelo" class="w-full bg-slate-800 border border-slate-600 text-white rounded-lg p-2 text-sm focus:border-blue-500 outline-none transition-colors">
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400 font-bold uppercase mb-1 block">N° de Serie</label>
+                    <input type="text" id="newSerie" class="w-full bg-slate-800 border border-slate-600 text-white rounded-lg p-2 text-sm focus:border-blue-500 outline-none transition-colors">
+                </div>
+            </div>
+            <div class="bg-slate-800 p-4 border-t border-slate-700 flex justify-end gap-3">
+                <button onclick="closeAddAssetModal()" class="px-5 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium rounded-lg transition border border-slate-600">Cancelar</button>
+                <button onclick="saveNewAsset()" class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition shadow-sm border border-blue-500 flex items-center gap-2">
+                    <i class="fa-solid fa-check"></i> Guardar Activo
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // DATOS INYECTADOS DIRECTAMENTE (Mantenemos tus datos intactos)
+        const RAW_DATA = [{"\u00edtem": 1, "TAG NUEVO": "ACU-213", "SALA/UBICACI\u00d3N": "TIC N\u00b06", "MARCA": "LIEBERT HPM", "MODELO": "M42UA000VD02020CX", "N\u00b0 DE SERIE Act": "8608530001", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 2, "TAG NUEVO": "ACU-214", "SALA/UBICACI\u00d3N": "TIC N\u00b06", "MARCA": "LIEBERT HPM", "MODELO": "M42UA000V302020CX", "N\u00b0 DE SERIE Act": "8608490003", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 3, "TAG NUEVO": "ACU-215", "SALA/UBICACI\u00d3N": "TIC N\u00b06", "MARCA": "LIEBERT HPM", "MODELO": "M42UA000V302020CX", "N\u00b0 DE SERIE Act": "8608490002", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "Fuga en Evaporador."}, {"\u00edtem": 4, "TAG NUEVO": "ACU-216", "SALA/UBICACI\u00d3N": "TIC N\u00b06", "MARCA": "LIEBERT HPM", "MODELO": "M42UA000V302020CX", "N\u00b0 DE SERIE Act": "8608490005", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "Fuga en tramo vertical"}, {"\u00edtem": 5, "TAG NUEVO": "ACU-217", "SALA/UBICACI\u00d3N": "TIC N\u00b06", "MARCA": "LIEBERT HPM", "MODELO": "M42UA000V302020CX", "N\u00b0 DE SERIE Act": "8608490004", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 6, "TAG NUEVO": "ACU-218", "SALA/UBICACI\u00d3N": "TIC N\u00b06", "MARCA": "LIEBERT HPM", "MODELO": "M42UA000V302020CX", "N\u00b0 DE SERIE Act": "8608490001", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Fuga en tramo vertical.", "Cto 2": "N/A"}, {"\u00edtem": 7, "TAG NUEVO": "ACU-200", "SALA/UBICACI\u00d3N": "TIC N\u00b05", "MARCA": "DATA AIRE", "MODELO": "DAAD 3034", "N\u00b0 DE SERIE Act": "2008-2747-A", "Tipo": "CRAC", "General": "Motor Evaporador N\u00b02 F/S. Equipo operativo con 2/3 motores.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 8, "TAG NUEVO": "ACU-201", "SALA/UBICACI\u00d3N": "TIC N\u00b05", "MARCA": "DATA AIRE", "MODELO": "DAAD 3034", "N\u00b0 DE SERIE Act": "2008-2746-A", "Tipo": "CRAC", "General": "Motor Evaporador N\u00b03 F/S. Equipo operativo con 2/3 motores.", "Cto 1": "N/A", "Cto 2": "Compresor en Falla (Sobre Consumo)"}, {"\u00edtem": 9, "TAG NUEVO": "ACU-202", "SALA/UBICACI\u00d3N": "TIC N\u00b05", "MARCA": "DATA AIRE", "MODELO": "DAAD 3034", "N\u00b0 DE SERIE Act": "2008-2749-A ", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 10, "TAG NUEVO": "ACU-203", "SALA/UBICACI\u00d3N": "TIC N\u00b05", "MARCA": "DATA AIRE", "MODELO": "DAAD 3034", "N\u00b0 DE SERIE Act": "2008-2748-A", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 11, "TAG NUEVO": "ACU-204", "SALA/UBICACI\u00d3N": "TIC N\u00b04", "MARCA": "LIEBERT HIROSS", "MODELO": "M29UA000V302010C0", "N\u00b0 DE SERIE Act": "6465250001", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 12, "TAG NUEVO": "ACU-205", "SALA/UBICACI\u00d3N": "TIC N\u00b04", "MARCA": "LIEBERT HPM", "MODELO": "M66UA000V302010P0", "N\u00b0 DE SERIE Act": "6921820004", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Compresor en Falla (Sobre Consumo)", "Cto 2": "N/A"}, {"\u00edtem": 13, "TAG NUEVO": "ACU-206", "SALA/UBICACI\u00d3N": "TIC N\u00b04", "MARCA": "STULZ", "MODELO": "ASD 562 A", "N\u00b0 DE SERIE Act": "10022264", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 14, "TAG NUEVO": "ACU-207", "SALA/UBICACI\u00d3N": "TIC N\u00b04", "MARCA": "LIEBERT HPM", "MODELO": "M66UA000V302010P0", "N\u00b0 DE SERIE Act": "6921820003", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Compresor en Falla (En corte)", "Cto 2": "N/A"}, {"\u00edtem": 15, "TAG NUEVO": "ACU-208", "SALA/UBICACI\u00d3N": "TIC N\u00b04", "MARCA": "LIEBERT HPM", "MODELO": "M66UA000V302010P0", "N\u00b0 DE SERIE Act": "6921820005", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "EEVV con problemas de regulaci\u00f3n."}, {"\u00edtem": 16, "TAG NUEVO": "ACU-209", "SALA/UBICACI\u00d3N": "TIC N\u00b04", "MARCA": "LIEBERT HPM", "MODELO": "M66UA000V302010P0", "N\u00b0 DE SERIE Act": "6921820002", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 17, "TAG NUEVO": "ACU-210", "SALA/UBICACI\u00d3N": "TIC N\u00b04", "MARCA": "LIEBERT HIROSS", "MODELO": "M29UA000V102000C0", "N\u00b0 DE SERIE Act": "5561090002", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 18, "TAG NUEVO": "ACU-211", "SALA/UBICACI\u00d3N": "TIC N\u00b04", "MARCA": "LIEBERT HPM", "MODELO": "M66UA000V302010P0", "N\u00b0 DE SERIE Act": "6921820001", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "Fuga en tramo vertical"}, {"\u00edtem": 19, "TAG NUEVO": "ACU-212", "SALA/UBICACI\u00d3N": "TIC N\u00b04", "MARCA": "STULZ", "MODELO": "ASD 562 A", "N\u00b0 DE SERIE Act": "10022265", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Compresor presenta ruido mecanico. Cto Operativo.", "Cto 2": "Fuga."}, {"\u00edtem": 20, "TAG NUEVO": "ACU-108", "SALA/UBICACI\u00d3N": "TIC N\u00b03", "MARCA": "STULZ", "MODELO": "CPU 291A", "N\u00b0 DE SERIE Act": "10034447", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 21, "TAG NUEVO": "ACU-109", "SALA/UBICACI\u00d3N": "TIC N\u00b03", "MARCA": "STULZ", "MODELO": "CPU 291A", "N\u00b0 DE SERIE Act": "10034337", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 22, "TAG NUEVO": "ACU-110", "SALA/UBICACI\u00d3N": "TIC N\u00b03", "MARCA": "STULZ", "MODELO": "CPU 291A", "N\u00b0 DE SERIE Act": "10034329", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 23, "TAG NUEVO": "ACU-111", "SALA/UBICACI\u00d3N": "TIC N\u00b03", "MARCA": "STULZ", "MODELO": "CPU 291A", "N\u00b0 DE SERIE Act": "10034464", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 24, "TAG NUEVO": "ACU-104", "SALA/UBICACI\u00d3N": "TIC N\u00b02", "MARCA": "AIR BLUE", "MODELO": "UEDA860HH", "N\u00b0 DE SERIE Act": "AIRB040230", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 25, "TAG NUEVO": "ACU-105", "SALA/UBICACI\u00d3N": "TIC N\u00b02", "MARCA": "AIR BLUE", "MODELO": "UEDA HH 860", "N\u00b0 DE SERIE Act": "AIRB026547", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 26, "TAG NUEVO": "ACU-106", "SALA/UBICACI\u00d3N": "TIC N\u00b02", "MARCA": "STULZ", "MODELO": "ASD712A", "N\u00b0 DE SERIE Act": "10022307", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 27, "TAG NUEVO": "ACU-107", "SALA/UBICACI\u00d3N": "TIC N\u00b02", "MARCA": "AIR BLUE", "MODELO": "UEDA HH 860", "N\u00b0 DE SERIE Act": "AIRB014546", "Tipo": "CRAC", "General": "Solo Ventilando. Con 1/2 motor ventilador.", "Cto 1": "Compresor en Falla (Mec\u00e1nica)", "Cto 2": "Compresor en falla (mecanica) y fuga"}, {"\u00edtem": 28, "TAG NUEVO": "ACU-100", "SALA/UBICACI\u00d3N": "TIC N\u00b01", "MARCA": "STULZ", "MODELO": "CPU1062A", "N\u00b0 DE SERIE Act": "10034242", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Fuga.", "Cto 2": "N/A"}, {"\u00edtem": 29, "TAG NUEVO": "ACU-101", "SALA/UBICACI\u00d3N": "TIC N\u00b01", "MARCA": "STULZ", "MODELO": "CPU1062A", "N\u00b0 DE SERIE Act": "10034243", "Tipo": "CRAC", "General": "Solo Ventilando. ", "Cto 1": "Fuga.", "Cto 2": "Fuga."}, {"\u00edtem": 30, "TAG NUEVO": "ACU-102", "SALA/UBICACI\u00d3N": "TIC N\u00b01", "MARCA": "STULZ", "MODELO": "CPU1062A", "N\u00b0 DE SERIE Act": "10034252", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Fuga.", "Cto 2": "N/A"}, {"\u00edtem": 31, "TAG NUEVO": "ACU-103", "SALA/UBICACI\u00d3N": "TIC N\u00b01", "MARCA": "STULZ", "MODELO": "CPU1062A", "N\u00b0 DE SERIE Act": "10034251", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 32, "TAG NUEVO": "ACU-010", "SALA/UBICACI\u00d3N": "SALA UZT (023)", "MARCA": "TRANE", "MODELO": "4MXX3560FB0R0AL", "N\u00b0 DE SERIE Act": "2028T1441X", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 33, "TAG NUEVO": "ACU-011", "SALA/UBICACI\u00d3N": "SALA UZT (023)", "MARCA": "TRANE", "MODELO": "4MXX3560FB0R0AL", "N\u00b0 DE SERIE Act": "2028T1438X", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 34, "TAG NUEVO": "ACU-439", "SALA/UBICACI\u00d3N": "SALA TELXIUS", "MARCA": "TECNAIR LV", "MODELO": "UPA 361B", "N\u00b0 DE SERIE Act": "3028887", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 35, "TAG NUEVO": "ACU-440", "SALA/UBICACI\u00d3N": "SALA TELXIUS", "MARCA": "TECNAIR LV", "MODELO": "UPA 361B", "N\u00b0 DE SERIE Act": "3028886", "Tipo": "CRAC", "General": "Solo Ventilando. ", "Cto 1": "Compresor Fuera de servicio por falla F500. Sin transductor de liquido.", "Cto 2": "N/A"}, {"\u00edtem": 36, "TAG NUEVO": "ACU-441", "SALA/UBICACI\u00d3N": "SALA TELXIUS", "MARCA": "TECNAIR LV", "MODELO": "UPA 361B", "N\u00b0 DE SERIE Act": "3028880", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 37, "TAG NUEVO": "ACU-442", "SALA/UBICACI\u00d3N": "SALA TELXIUS", "MARCA": "TECNAIR LV", "MODELO": "UPA 211B", "N\u00b0 DE SERIE Act": "3022630", "Tipo": "CRAC", "General": "Solo Ventilando. ", "Cto 1": "Compresor en corto circuito. ", "Cto 2": "N/A"}, {"\u00edtem": 38, "TAG NUEVO": "ACU-443", "SALA/UBICACI\u00d3N": "SALA TELXIUS", "MARCA": "TECNAIR LV", "MODELO": "UPA 211B", "N\u00b0 DE SERIE Act": "3022627", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 39, "TAG NUEVO": "ACU-113", "SALA/UBICACI\u00d3N": "SALA SDH", "MARCA": "YORK", "MODELO": "YC-OPA 361B", "N\u00b0 DE SERIE Act": "3083837", "Tipo": "CRAC", "General": "Apagado por ahorro energ\u00e9tico.", "Cto 1": "compresor fuera de servicio por falla f-0103.", "Cto 2": "N/A"}, {"\u00edtem": 40, "TAG NUEVO": "ACU-114", "SALA/UBICACI\u00d3N": "SALA SDH", "MARCA": "YORK", "MODELO": "YC-OPA 361B", "N\u00b0 DE SERIE Act": "3083835", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 41, "TAG NUEVO": "ACU-115", "SALA/UBICACI\u00d3N": "SALA SDH", "MARCA": "TECNAIR", "MODELO": "OPA 461B", "N\u00b0 DE SERIE Act": "2112829", "Tipo": "CRAC", "General": "Solo Ventilando. ", "Cto 1": "compresor fuera de servicio por falla f-500.", "Cto 2": "N/A"}, {"\u00edtem": 42, "TAG NUEVO": "ACU-116", "SALA/UBICACI\u00d3N": "SALA SDH", "MARCA": "TECNAIR", "MODELO": "OPA 461B", "N\u00b0 DE SERIE Act": "2112830", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 43, "TAG NUEVO": "ACU-117", "SALA/UBICACI\u00d3N": "SALA SDH", "MARCA": "YORK", "MODELO": "YC-OPA 461B", "N\u00b0 DE SERIE Act": "3187169", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 44, "TAG NUEVO": "ACU-118", "SALA/UBICACI\u00d3N": "SALA SDH", "MARCA": "YORK", "MODELO": "YC-OPA 461B", "N\u00b0 DE SERIE Act": "3187168", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 45, "TAG NUEVO": "ACU-224", "SALA/UBICACI\u00d3N": "SALA PSSBA", "MARCA": "LIEBERT PEX", "MODELO": "P1035UA1MEHL12S1D070CZ0L0", "N\u00b0 DE SERIE Act": "21F01185032179030006", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 46, "TAG NUEVO": "ACU-225", "SALA/UBICACI\u00d3N": "SALA PSSBA", "MARCA": "LIEBERT PEX", "MODELO": "P1035UA1MEHL12S1D070CZ0L0", "N\u00b0 DE SERIE Act": "21F01185032179010002 ", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 47, "TAG NUEVO": "ACU-226", "SALA/UBICACI\u00d3N": "SALA PSSBA", "MARCA": "LIEBERT PEX", "MODELO": "P1035UA1MEHL12S1D070CZ0L0", "N\u00b0 DE SERIE Act": "21F01185032179030002", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 48, "TAG NUEVO": "ACU-227", "SALA/UBICACI\u00d3N": "SALA PSSBA", "MARCA": "LIEBERT PEX", "MODELO": "P1035UA1MEHL12S1D070CZ0L0", "N\u00b0 DE SERIE Act": "21F01185032179020008 ", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 49, "TAG NUEVO": "ACU-307", "SALA/UBICACI\u00d3N": "SALA NOKIA", "MARCA": "HISENSE", "MODELO": "AUV-60UR4RC4", "N\u00b0 DE SERIE Act": "1KA060 00JVNP 092AEPG 0016", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 50, "TAG NUEVO": "ACU-308", "SALA/UBICACI\u00d3N": "SALA NOKIA", "MARCA": "CLARK", "MODELO": "NCP-60HRTE", "N\u00b0 DE SERIE Act": "VKA060001LNP0E8PXPG0040", "Tipo": "CONFORT", "General": "Apagado por ahorro energ\u00e9tico.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 51, "TAG NUEVO": "ACU-501", "SALA/UBICACI\u00d3N": "SALA NOC 2", "MARCA": "LIEBERT HIROSS", "MODELO": "M50OA000V102000C0", "N\u00b0 DE SERIE Act": "4845350001", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "falla en v\u00e1lvula de expansi\u00f3n y Compresor con ruido mec\u00e1nico."}, {"\u00edtem": 52, "TAG NUEVO": "ACU-502", "SALA/UBICACI\u00d3N": "SALA NOC 2", "MARCA": "UNIFLAIR", "MODELO": "TUAV1022A", "N\u00b0 DE SERIE Act": "UCV102943 ", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "falla en v\u00e1lvula de expansi\u00f3n y Compresor con ruido mec\u00e1nico."}, {"\u00edtem": 53, "TAG NUEVO": "ACU-500", "SALA/UBICACI\u00d3N": "SALA NOC 1", "MARCA": "AIR BLUE", "MODELO": "OEDA HH 350", "N\u00b0 DE SERIE Act": "AIRB014674", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 54, "TAG NUEVO": "ACU-436", "SALA/UBICACI\u00d3N": "SALA MOVIL", "MARCA": "LIEBERT HIROSS", "MODELO": "65UA1000V12C0", "N\u00b0 DE SERIE Act": "3501820001", "Tipo": "CRAC", "General": "N/A", "Cto 1": "valvula de expansi\u00f3n con problemas de regulacion ", "Cto 2": "N/A"}, {"\u00edtem": 55, "TAG NUEVO": "ACU-437", "SALA/UBICACI\u00d3N": "SALA MOVIL", "MARCA": "LIEBERT HPM", "MODELO": "M66UA000V302010C0", "N\u00b0 DE SERIE Act": "7990940001", "Tipo": "CRAC", "General": "Equipo desmantelado, Proyecto denver.", "Cto 1": "Cto 1 fuera de servicio por v\u00e1lvula de expansi\u00f3n con problemas de regulaci\u00f3n. ", "Cto 2": "C/2 fuera de servicio por problemas mec\u00e1nicos en compresor."}, {"\u00edtem": 56, "TAG NUEVO": "ACU-438", "SALA/UBICACI\u00d3N": "SALA MOVIL", "MARCA": "LIEBERT HIROSS", "MODELO": "65UA1000V12C0", "N\u00b0 DE SERIE Act": "3501810001", "Tipo": "CRAC", "General": "Equipo Deshabilitado, Desmantelado por proyecto Denver.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 57, "TAG NUEVO": "ACU-219", "SALA/UBICACI\u00d3N": "SALA DE DATOS", "MARCA": "DATA AIRE", "MODELO": "DAAD-2634", "N\u00b0 DE SERIE Act": " 2008-4347-A ", "Tipo": "CRAC", "General": "N/A", "Cto 1": "EVV con problemas de regulaci\u00f3n. Cto operativo.", "Cto 2": "EVV con problemas de regulaci\u00f3n. Cto operativo."}, {"\u00edtem": 58, "TAG NUEVO": "ACU-220", "SALA/UBICACI\u00d3N": "SALA DE DATOS", "MARCA": "DATA AIRE", "MODELO": "DAAD-2634", "N\u00b0 DE SERIE Act": " 2008-4349-A ", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 59, "TAG NUEVO": "ACU-221", "SALA/UBICACI\u00d3N": "SALA DE DATOS", "MARCA": "DATA AIRE", "MODELO": "DAAD-2634", "N\u00b0 DE SERIE Act": " 2008-4350-A ", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 60, "TAG NUEVO": "ACU-222", "SALA/UBICACI\u00d3N": "SALA DE DATOS", "MARCA": "DATA AIRE", "MODELO": "DAAD-2634", "N\u00b0 DE SERIE Act": " 2008-4348-A ", "Tipo": "CRAC", "General": "Equipo Fuera de servicio. Desmantelado. NR", "Cto 1": "motor evaporador N2 fuera de servicio,", "Cto 2": "Compresor con sobreconsumo y ruido mecanico."}, {"\u00edtem": 61, "TAG NUEVO": "AHC-304", "SALA/UBICACI\u00d3N": "SALA CONMUTACI\u00d3N", "MARCA": "STULZ", "MODELO": "CPU 401G", "N\u00b0 DE SERIE Act": "10023857", "Tipo": "CRAH", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 62, "TAG NUEVO": "AHC-305", "SALA/UBICACI\u00d3N": "SALA CONMUTACI\u00d3N", "MARCA": "STULZ", "MODELO": "CPU 401G", "N\u00b0 DE SERIE Act": "10023856", "Tipo": "CRAH", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 63, "TAG NUEVO": "AHC-306", "SALA/UBICACI\u00d3N": "SALA CONMUTACI\u00d3N", "MARCA": "STULZ", "MODELO": "CPU 401G", "N\u00b0 DE SERIE Act": "10023838", "Tipo": "CRAH", "General": "Equipo en proceso de transferencia de Cw a Dx.", "Cto 1": "fuera de servicio por problemas en regulaci\u00f3n en v\u00e1lvula G. ", "Cto 2": "N/A"}, {"\u00edtem": 64, "TAG NUEVO": "ACU-413", "SALA/UBICACI\u00d3N": "SALA COMUNICACIONES", "MARCA": "TECNAIR", "MODELO": "UPA 361B", "N\u00b0 DE SERIE Act": "2181027", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 65, "TAG NUEVO": "ACU-414", "SALA/UBICACI\u00d3N": "SALA COMUNICACIONES", "MARCA": "TECNAIR", "MODELO": "UPA 361B", "N\u00b0 DE SERIE Act": "2181028", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 66, "TAG NUEVO": "ACU-434", "SALA/UBICACI\u00d3N": "SALA CCI", "MARCA": "LIEBERT", "MODELO": "UH199ASFSM", "N\u00b0 DE SERIE Act": "218373-023", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Fuera de servicio por Fuga (circuito de refrigeraci\u00f3n cortado). ", "Cto 2": "N/A"}, {"\u00edtem": 67, "TAG NUEVO": "ACU-435", "SALA/UBICACI\u00d3N": "SALA CCI", "MARCA": "LIEBERT", "MODELO": "UH199ASFSM", "N\u00b0 DE SERIE Act": "218373-022 ", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "Fuga en evaporador."}, {"\u00edtem": 68, "TAG NUEVO": "ACU-112", "SALA/UBICACI\u00d3N": "SALA BANDA ANCHA", "MARCA": "AIR DATA", "MODELO": "MC-5.1-14", "N\u00b0 DE SERIE Act": "965495", "Tipo": "CRAC", "General": "Motor Evaporador N\u00b01 F/S", "Cto 1": "Motor Evaporador N\u00b01 F/S", "Cto 2": "N/A"}, {"\u00edtem": 69, "TAG NUEVO": "ACU-309", "SALA/UBICACI\u00d3N": "SALA ALCATEL", "MARCA": "CLARK", "MODELO": "CCF-60HRT12", "N\u00b0 DE SERIE Act": "107170502110600000", "Tipo": "CONFORT", "General": "Sala deshabilitada, equipo apagado.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 70, "TAG NUEVO": "ACU-310", "SALA/UBICACI\u00d3N": "SALA ALCATEL", "MARCA": "UNIFLAIR", "MODELO": "AMICO", "N\u00b0 DE SERIE Act": "S/N", "Tipo": "CRAC", "General": "Sala deshabilitada, equipo apagado.", "Cto 1": "Compresor con bajo rendimiento.", "Cto 2": "N/A"}, {"\u00edtem": 71, "TAG NUEVO": "IRW-415", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1128212560", "Tipo": "CRAH", "General": "N/A", "Cto 1": "Alarm: 1 of 1 Critical: External Communication Fault", "Cto 2": "N/A"}, {"\u00edtem": 72, "TAG NUEVO": "IRW-416", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1128212561", "Tipo": "CRAH", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 73, "TAG NUEVO": "IRW-417", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1110111239", "Tipo": "CRAH", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 74, "TAG NUEVO": "IRW-418", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1128212559", "Tipo": "CRAH", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 75, "TAG NUEVO": "IRW-419", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1128212563", "Tipo": "CRAH", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 76, "TAG NUEVO": "IRW-420", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1128212564", "Tipo": "CRAH", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 77, "TAG NUEVO": "IRW-421", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1128212615", "Tipo": "CRAH", "General": "N/A", "Cto 1": "Alarm: 1 of 1 Group Communication Lost", "Cto 2": "N/A"}, {"\u00edtem": 78, "TAG NUEVO": "IRW-422", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1117112199", "Tipo": "CRAH", "General": "N/A", "Cto 1": "Alarm: 1 of 1 Critical: Rack Inlet High Temperature Violation", "Cto 2": "N/A"}, {"\u00edtem": 79, "TAG NUEVO": "IRW-423", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1128212557", "Tipo": "CRAH", "General": "N/A", "Cto 1": "Pantalla en blanco.", "Cto 2": "N/A"}, {"\u00edtem": 80, "TAG NUEVO": "IRW-424", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1110111201", "Tipo": "CRAH", "General": "N/A", "Cto 1": "Alarm: 1 of 1 Warning: Leaving Fluid Temperature Sensor Fault", "Cto 2": "N/A"}, {"\u00edtem": 81, "TAG NUEVO": "IRW-425", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1023112328", "Tipo": "CRAH", "General": "N/A", "Cto 1": "Alarm: 1 of 1 Critical: Flowmeter Fluid Fault", "Cto 2": "N/A"}, {"\u00edtem": 82, "TAG NUEVO": "IRW-426", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1022211574", "Tipo": "CRAH", "General": "N/A", "Cto 1": "Alarm: 1 of 1 Critical: Flowmeter Fluid Fault", "Cto 2": "N/A"}, {"\u00edtem": 83, "TAG NUEVO": "IRW-427", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1043112967", "Tipo": "CRAH", "General": "N/A", "Cto 1": "Alarm: 1 of 4 Warning: Leaving Fluid Temperature Sensor Fault / 2 of 4 Warning: Power Source A Failure / 3 of 4 Warning: Fan Power Supply Left Fault / 4 of 4 Warning: Return Air High Temperature Violation", "Cto 2": "N/A"}, {"\u00edtem": 84, "TAG NUEVO": "IRW-428", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1110111233", "Tipo": "CRAH", "General": "Equipo apagado.", "Cto 1": "Fuera de servicio por fuente de poder o placa (se desconoce falla)", "Cto 2": "N/A"}, {"\u00edtem": 85, "TAG NUEVO": "IRW-429", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1110111234", "Tipo": "CRAH", "General": "N/A", "Cto 1": "Alarmt 1 of 1 Warning: Leaving Fluid Temperature Sensor Fault", "Cto 2": "N/A"}, {"\u00edtem": 86, "TAG NUEVO": "IRW-430", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1110111237", "Tipo": "CRAH", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 87, "TAG NUEVO": "IRW-431", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK0948110016", "Tipo": "CRAH", "General": "N/A", "Cto 1": "Alarm: 1 of 2 Warning: Leaving Fluid Temperature Sensor Fault / 2 of 2 Warning: Group Communication Lost", "Cto 2": "N/A"}, {"\u00edtem": 88, "TAG NUEVO": "IRW-432", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1022211345", "Tipo": "CRAH", "General": "N/A", "Cto 1": "Alarm: 1 of 1 Critical: Flowmeter Fluid Fault", "Cto 2": "N/A"}, {"\u00edtem": 89, "TAG NUEVO": "IRW-433", "SALA/UBICACI\u00d3N": "RESO", "MARCA": "APC", "MODELO": "ACRC103", "N\u00b0 DE SERIE Act": "UK1110111225", "Tipo": "CRAH", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 90, "TAG NUEVO": "ACU-012", "SALA/UBICACI\u00d3N": "PRINCIPAL 9", "MARCA": "LIEBERT", "MODELO": "FH290A-F10", "N\u00b0 DE SERIE Act": "205475-004", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Fuera de servicio por falla en compresor (mecanica)", "Cto 2": "N/A"}, {"\u00edtem": 91, "TAG NUEVO": "ACU-013", "SALA/UBICACI\u00d3N": "PRINCIPAL 9", "MARCA": "LIEBERT", "MODELO": "FH290A-F10", "N\u00b0 DE SERIE Act": "205475-001 ", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "Fuga. Cto no reparable fuga evaporador."}, {"\u00edtem": 92, "TAG NUEVO": "ACU-014", "SALA/UBICACI\u00d3N": "PRINCIPAL 9", "MARCA": "LIEBERT", "MODELO": "UH199AU-F10", "N\u00b0 DE SERIE Act": " 137084U", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Fuera de servicio por fuga.", "Cto 2": "N/A"}, {"\u00edtem": 93, "TAG NUEVO": "ACU-015", "SALA/UBICACI\u00d3N": "PRINCIPAL 9", "MARCA": "LIEBERT", "MODELO": "UH199AU-F10", "N\u00b0 DE SERIE Act": "137084AA", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "fuera de servicio por circuito cortado "}, {"\u00edtem": 94, "TAG NUEVO": "ACU-230", "SALA/UBICACI\u00d3N": "PREPAGO", "MARCA": "STULZ", "MODELO": "ASU 812 A", "N\u00b0 DE SERIE Act": "10028754", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "Fuga."}, {"\u00edtem": 95, "TAG NUEVO": "ACU-231", "SALA/UBICACI\u00d3N": "PREPAGO", "MARCA": "STULZ", "MODELO": "CPU 802 A", "N\u00b0 DE SERIE Act": "10034752", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "Fuga."}, {"\u00edtem": 96, "TAG NUEVO": "ACU-232", "SALA/UBICACI\u00d3N": "PREPAGO", "MARCA": "STULZ", "MODELO": "ASU 812 A", "N\u00b0 DE SERIE Act": "10028753", "Tipo": "CRAC", "General": "Equipo operativo.", "Cto 1": "Error Sens Press EEV1", "Cto 2": "Error Sens Press EEV2"}, {"\u00edtem": 97, "TAG NUEVO": "ACU-403", "SALA/UBICACI\u00d3N": "MUNDO", "MARCA": "LIEBERT HIROSS", "MODELO": "S23OA000V102000CX", "N\u00b0 DE SERIE Act": "3665850001", "Tipo": "CRAC", "General": "Sala en proceso de deshabilitaci\u00f3n, activo fuera de plan de mtto.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 98, "TAG NUEVO": "ACU-404", "SALA/UBICACI\u00d3N": "MUNDO", "MARCA": "LIEBERT HIROSS", "MODELO": "S23OA000V102000CX", "N\u00b0 DE SERIE Act": "3665850003", "Tipo": "CRAC", "General": "Apagado por ahorro energ\u00e9tico.", "Cto 1": "Fuga.", "Cto 2": "N/A"}, {"\u00edtem": 99, "TAG NUEVO": "ACU-400", "SALA/UBICACI\u00d3N": "MIDRANGE", "MARCA": "CLIMAVENETA", "MODELO": "AXO40XFBCT10M120010040E", "N\u00b0 DE SERIE Act": "17585", "Tipo": "CRAC", "General": "Apagado por ahorro energ\u00e9tico.", "Cto 1": "N/A", "Cto 2": "V\u00e1lvula de expansi\u00f3n con problemas y Fuga."}, {"\u00edtem": 100, "TAG NUEVO": "ACU-401", "SALA/UBICACI\u00d3N": "MIDRANGE", "MARCA": "CLIMAVENETA", "MODELO": "AXO40XFBCT10M120010040E", "N\u00b0 DE SERIE Act": "17586", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Compresor con ruido mecanico, Cto con fuga.", "Cto 2": "N/A"}, {"\u00edtem": 101, "TAG NUEVO": "ACU-402", "SALA/UBICACI\u00d3N": "MIDRANGE", "MARCA": "UNIFLAIR", "MODELO": "TDAV2522A", "N\u00b0 DE SERIE Act": "UCW 110512", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 102, "TAG NUEVO": "ACU-233", "SALA/UBICACI\u00d3N": "HOUSING", "MARCA": "MIDEA", "MODELO": "MVC-60WN1-M", "N\u00b0 DE SERIE Act": "541P229950944240100001", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 103, "TAG NUEVO": "AHC-228", "SALA/UBICACI\u00d3N": "GSM", "MARCA": "UNIFLAIR", "MODELO": "MD.A-W (c) 0711H", "N\u00b0 DE SERIE Act": "UCM 423G0", "Tipo": "CRAH", "General": "Equipo apagado. Motor evaporador 1 con falla Electrica.", "Cto 1": "Fuera de servicio por Compresor.", "Cto 2": "N/A"}, {"\u00edtem": 104, "TAG NUEVO": "AHC-229", "SALA/UBICACI\u00d3N": "GSM", "MARCA": "LIEBERT ", "MODELO": "UH130AUFAM", "N\u00b0 DE SERIE Act": "226502-012", "Tipo": "CRAH", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 105, "TAG NUEVO": "AHC-901", "SALA/UBICACI\u00d3N": "ENERGIA -2 (SM48)", "MARCA": "AIR BLUE", "MODELO": "OEDA CO 760", "N\u00b0 DE SERIE Act": "AIRB014831", "Tipo": "CRAH", "General": "Equipo Deshabilitado, Desmantelado por proyecto Denver.", "Cto 1": "N/A", "Cto 2": "Fuga."}, {"\u00edtem": 106, "TAG NUEVO": "AHC-902", "SALA/UBICACI\u00d3N": "ENERGIA -2 (SM48)", "MARCA": "AIR BLUE", "MODELO": "OEDA CO 760", "N\u00b0 DE SERIE Act": "AIRB014830", "Tipo": "CRAH", "General": "Equipo Deshabilitado, Desmantelado por proyecto Denver.", "Cto 1": "Fuga.", "Cto 2": "N/A"}, {"\u00edtem": 107, "TAG NUEVO": "ACU-001", "SALA/UBICACI\u00d3N": "ENERG\u00cdA -1 (SM50)", "MARCA": "STULZ", "MODELO": "CPU 401 A", "N\u00b0 DE SERIE Act": "10019204", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 108, "TAG NUEVO": "ACU-002", "SALA/UBICACI\u00d3N": "ENERG\u00cdA -1 (SM50)", "MARCA": "LIEBERT HIROSS", "MODELO": "S23OA000V102000CX", "N\u00b0 DE SERIE Act": "3665850002", "Tipo": "CRAC", "General": "Solo Ventilando.", "Cto 1": "Con fuga ", "Cto 2": "N/A"}, {"\u00edtem": 109, "TAG NUEVO": "ACU-003", "SALA/UBICACI\u00d3N": "ENERG\u00cdA -1 (SM50)", "MARCA": "STULZ", "MODELO": "CCU 201 A ", "N\u00b0 DE SERIE Act": "10018364", "Tipo": "CRAC", "General": "Solo Ventilando.", "Cto 1": "Cto fuera de servicio por fuga en compresor (Carter)", "Cto 2": "N/A"}, {"\u00edtem": 110, "TAG NUEVO": "ACU-004", "SALA/UBICACI\u00d3N": "ENERG\u00cdA -1 (SM50)", "MARCA": "STULZ", "MODELO": "CPU 401 A", "N\u00b0 DE SERIE Act": "10019203", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 111, "TAG NUEVO": "ACU-005", "SALA/UBICACI\u00d3N": "ENERG\u00cdA -1 (SM50)", "MARCA": "GOODMAN", "MODELO": "XRUF61D24", "N\u00b0 DE SERIE Act": "1905272349", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 112, "TAG NUEVO": "ACU-006", "SALA/UBICACI\u00d3N": "ENERG\u00cdA -1 (SM50)", "MARCA": "GOODMAN", "MODELO": "XRUF61D24", "N\u00b0 DE SERIE Act": "1905272357", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 113, "TAG NUEVO": "ACU-007", "SALA/UBICACI\u00d3N": "ENERG\u00cdA -1 (SM50)", "MARCA": "GOODMAN", "MODELO": "XRUF61D24", "N\u00b0 DE SERIE Act": "1905272350", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 114, "TAG NUEVO": "ACU-008", "SALA/UBICACI\u00d3N": "ENERG\u00cdA -1 (SM50)", "MARCA": "GOODMAN", "MODELO": "XRUF61D24", "N\u00b0 DE SERIE Act": "1905272354", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 115, "TAG NUEVO": "ACU-009", "SALA/UBICACI\u00d3N": "ENERG\u00cdA -1 (SM50)", "MARCA": "GOODMAN", "MODELO": "XRUF61D24", "N\u00b0 DE SERIE Act": "1905272356", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 116, "TAG NUEVO": "AHC-223", "SALA/UBICACI\u00d3N": "CROSS CONECT", "MARCA": "LIEBERT", "MODELO": "UH199ASFAM", "N\u00b0 DE SERIE Act": "224942-002 ", "Tipo": "CRAH", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 117, "TAG NUEVO": "ACU-405", "SALA/UBICACI\u00d3N": "CPD (STORAGE)", "MARCA": "YORK", "MODELO": "YC-UPA 491B", "N\u00b0 DE SERIE Act": "3187166", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 118, "TAG NUEVO": "ACU-406", "SALA/UBICACI\u00d3N": "CPD (STORAGE)", "MARCA": "AIR BLUE", "MODELO": "UEDA 66.2 HH R410A", "N\u00b0 DE SERIE Act": "AIRB046117", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 119, "TAG NUEVO": "ACU-407", "SALA/UBICACI\u00d3N": "CPD (STORAGE)", "MARCA": "AIR BLUE", "MODELO": "UEDA 66.2 HH R410A", "N\u00b0 DE SERIE Act": "AIRB046116", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Compresor con mezcla de refrigerante. (F/S) ", "Cto 2": "N/A"}, {"\u00edtem": 120, "TAG NUEVO": "ACU-408", "SALA/UBICACI\u00d3N": "CPD (MAINFRAME)", "MARCA": "TECNAIR", "MODELO": "UPA 852B", "N\u00b0 DE SERIE Act": "2173162", "Tipo": "CRAC", "General": "N/A", "Cto 1": "Sin compresor", "Cto 2": "N/A"}, {"\u00edtem": 121, "TAG NUEVO": "ACU-409", "SALA/UBICACI\u00d3N": "CPD (MAINFRAME)", "MARCA": "TECNAIR", "MODELO": "UPA 852B", "N\u00b0 DE SERIE Act": "2173163", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "Compresor en corte y falla en transductor de presi\u00f3n."}, {"\u00edtem": 122, "TAG NUEVO": "ACU-410", "SALA/UBICACI\u00d3N": "CPD (MAINFRAME)", "MARCA": "TECNAIR", "MODELO": "UPA 852B", "N\u00b0 DE SERIE Act": "2173166", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "Eq sin compresor y con fuga."}, {"\u00edtem": 123, "TAG NUEVO": "ACU-411", "SALA/UBICACI\u00d3N": "CPD (MAINFRAME)", "MARCA": "TECNAIR", "MODELO": "UPA 852B", "N\u00b0 DE SERIE Act": "2173167", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 124, "TAG NUEVO": "ACU-412", "SALA/UBICACI\u00d3N": "CPD (MAINFRAME)", "MARCA": "YORK", "MODELO": "YC - UPA 491B", "N\u00b0 DE SERIE Act": "3187165", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 125, "TAG NUEVO": "CLT-001", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #50 INTERMEDIO", "MARCA": "Protec", "MODELO": "FWS - 127 - 7,5 - GI", "N\u00b0 DE SERIE Act": "WS 14127009", "Tipo": "TORRE DE ENFRIAMIENTO", "General": "1.- Relleno en mal estado.\n2.- V\u00e1lvula VT1-02 con problemas de cierre.\n3.- Tuber\u00eda de desague con filtraci\u00f3n.\n4.- Sensor TAG en HMI \"TIT01B-IN2\" defectuoso.\n5.- Pendiente Correcci\u00f3n de puntos de oxidaci\u00f3n.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 126, "TAG NUEVO": "CLT-002", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #50 INTERMEDIO", "MARCA": "Protec", "MODELO": "FWS - 127 - 7,5 - GI", "N\u00b0 DE SERIE Act": "WS 14127010", "Tipo": "TORRE DE ENFRIAMIENTO", "General": "1.- Relleno en mal estado.\n2.- V\u00e1lvula VT2-13 con problemas de cierre.\n3.- V\u00e1lvula VT2-14 con problemas de cierre.\n4.- Sensor TAG en HMI \"TIT02B-IN2\" no muestra par\u00e1metros.\n5.- Tuber\u00eda de desague con filtraci\u00f3n.\n6.- Pendiente Correcci\u00f3n de puntos de oxidaci\u00f3n.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 127, "TAG NUEVO": "PMP-005", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #50 INTERMEDIO", "MARCA": "WEG", "MODELO": "01518EP3E254JM-W22", "N\u00b0 DE SERIE Act": "1030315353", "Tipo": "BOMBA", "General": "Bomba PMP-005 con filtraci\u00f3n en sello mec\u00e1nico de car\u00e1cter menor, bomba se encuentra disponible y se mantiene en seguimiento.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 128, "TAG NUEVO": "PMP-006", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #50 INTERMEDIO", "MARCA": "WEG", "MODELO": "01518EP3E254JM-W22", "N\u00b0 DE SERIE Act": "1030315355", "Tipo": "BOMBA", "General": "1.- Bomba PMP-006 con filtraci\u00f3n en el sello mec\u00e1nico.\n2.- Filtro de agua (Y) en Bomba PMP-006 requiere cambio.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 129, "TAG NUEVO": "PMP-007", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #50 INTERMEDIO", "MARCA": "WEG", "MODELO": "01518EP3E254JM-W22", "N\u00b0 DE SERIE Act": "1030315354", "Tipo": "BOMBA", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 130, "TAG NUEVO": "PMP-008", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #50 INTERMEDIO", "MARCA": "WEG", "MODELO": "01518ET3E254JM-W22", "N\u00b0 DE SERIE Act": "1021573277", "Tipo": "BOMBA", "General": "1.- PMP con filtraci\u00f3n por sello mecanico. \n2.- FILTRO (Y) con problemas, requiere cambio.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 131, "TAG NUEVO": "PMP-009", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #50 INTERMEDIO", "MARCA": "WEG", "MODELO": "TE1BFOXO", "N\u00b0 DE SERIE Act": "1022554830", "Tipo": "BOMBA", "General": "Pendiente limpieza de filtro Y.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 132, "TAG NUEVO": "PMP-010", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #50 INTERMEDIO", "MARCA": "WEG", "MODELO": "TE1BFOXO", "N\u00b0 DE SERIE Act": "1022554827", "Tipo": "BOMBA", "General": "Pendiente limpieza de filtro Y.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 133, "TAG NUEVO": "PMP-011", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #50 INTERMEDIO", "MARCA": "WEG", "MODELO": "TE1BFOXO", "N\u00b0 DE SERIE Act": "1022554828", "Tipo": "BOMBA", "General": "Pendiente limpieza de filtro Y.", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 134, "TAG NUEVO": "CHL-001", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #44", "MARCA": "TRANE", "MODELO": "CGAM 090E 2E02 XXD2", "N\u00b0 DE SERIE Act": "U11H24944", "Tipo": "CHILLER", "General": "N/A", "Cto 1": "Resistencia compresor da\u00f1ada.", "Cto 2": "Resistencia compresor da\u00f1ada."}, {"\u00edtem": 135, "TAG NUEVO": "CHL-002", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #44", "MARCA": "TRANE", "MODELO": "CGAM 090E 2E02 XXD2", "N\u00b0 DE SERIE Act": "U11H24943", "Tipo": "CHILLER", "General": "N/A", "Cto 1": "N/A", "Cto 2": "Resistencia compresor da\u00f1ada."}, {"\u00edtem": 136, "TAG NUEVO": "PMP-001", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #44", "MARCA": "CALPEDA", "MODELO": "NR 65/160 A/A", "N\u00b0 DE SERIE Act": "911393122", "Tipo": "BOMBA", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 137, "TAG NUEVO": "PMP-002", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #44", "MARCA": "CALPEDA", "MODELO": "NR 65/160 A/A", "N\u00b0 DE SERIE Act": "2019213306", "Tipo": "BOMBA", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 138, "TAG NUEVO": "PMP-003", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #44", "MARCA": "CALPEDA", "MODELO": "NR 65/160 A/A", "N\u00b0 DE SERIE Act": "911393123", "Tipo": "BOMBA", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 139, "TAG NUEVO": "PMP-004", "SALA/UBICACI\u00d3N": "AZOTEA, SAN MARTIN #44", "MARCA": "CALPEDA", "MODELO": "NR 65/160 A/A", "N\u00b0 DE SERIE Act": "911393125", "Tipo": "BOMBA", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 140, "TAG NUEVO": "ACU-311", "SALA/UBICACI\u00d3N": " SALA TX", "MARCA": "LIEBERT PEX4", "MODELO": "P1045UA1380902E1DL7NCE040", "N\u00b0 DE SERIE Act": "210130A0F52251010003", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 141, "TAG NUEVO": "ACU-312", "SALA/UBICACI\u00d3N": " SALA TX", "MARCA": "LIEBERT PEX4", "MODELO": "P1045UA1380902E1DL7NCE040", "N\u00b0 DE SERIE Act": "210130A0F52251010002", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 142, "TAG NUEVO": "ACU-313", "SALA/UBICACI\u00d3N": " SALA TX", "MARCA": "LIEBERT PEX4", "MODELO": "P1045UA1380902E1DL7NCE040", "N\u00b0 DE SERIE Act": "210130A0F52251010001", "Tipo": "CRAC", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 143, "TAG NUEVO": "ACU-903", "SALA/UBICACI\u00d3N": "Sala Bater\u00eda SM48", "MARCA": "WESTRIC", "MODELO": "DC-005 FSH1APS", "N\u00b0 DE SERIE Act": "134443", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 144, "TAG NUEVO": "ACU-904", "SALA/UBICACI\u00d3N": "Sala Bater\u00eda SM48", "MARCA": "WESTRIC", "MODELO": "DC-005 FSH1APS", "N\u00b0 DE SERIE Act": "134438", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}, {"\u00edtem": 145, "TAG NUEVO": "ACU-905", "SALA/UBICACI\u00d3N": "Sala Bater\u00eda SM48", "MARCA": "WESTRIC", "MODELO": "DC-005 FSH1APS", "N\u00b0 DE SERIE Act": "134437", "Tipo": "CONFORT", "General": "N/A", "Cto 1": "N/A", "Cto 2": "N/A"}];
+
+        let baseDeDatos = [];
+        let filteredData = [];
+        let currentEditingGlobalIdx = null; // NUEVA VARIABLE PARA EDICION
+        
+        let state = {
+            tipo: 'ALL',
+            room: 'ALL',
+            falla: 'ALL',
+            search: '',
+            sortBy: 'tag',
+            sortAsc: true
+        };
+
+        let chartStatusInstance = null;
+        let chartFaultsInstance = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            procesarDatos();
+            poblarFiltrosSala();
+            renderizarTodo();
+            
+            // Event listener buscador
+            document.getElementById('searchInput').addEventListener('input', (e) => {
+                state.search = e.target.value.toLowerCase();
+                aplicarFiltros();
+            });
+            
+            // Cierre de modal con ESC
+            document.addEventListener('keydown', (e) => {
+                if(e.key === 'Escape') {
+                    closeModal();
+                    closeAddAssetModal();
+                }
+            });
+        });
+
+        // -------------------------
+        // PROCESAMIENTO DE DATOS INTELIGENTE (ACTUALIZADO)
+        // -------------------------
+        function procesarDatos() {
+            baseDeDatos = RAW_DATA.map(eq => {
+                const tag = String(eq['TAG NUEVO'] || 'N/A').trim();
+                const tipo = String(eq['Tipo'] || 'DESCONOCIDO').trim();
+                const ubicacion = String(eq['SALA/UBICACIÓN'] || '-').trim();
+                const marca = String(eq['MARCA'] || '-').trim();
+                const modelo = String(eq['MODELO'] || '-').trim();
+                const serie = String(eq['N° DE SERIE Act'] || '-').trim();
+                
+                let obsGeneral = String(eq['General'] || '').trim();
+                let obsCto1 = String(eq['Cto 1'] || '').trim();
+                let obsCto2 = String(eq['Cto 2'] || '').trim();
+
+                // Limpieza visual "N/A" literal a string vacio
+                if(obsGeneral.toUpperCase() === 'N/A' || obsGeneral.toUpperCase() === 'NAN') obsGeneral = '';
+                if(obsCto1.toUpperCase() === 'N/A' || obsCto1.toUpperCase() === 'NAN') obsCto1 = '';
+                if(obsCto2.toUpperCase() === 'N/A' || obsCto2.toUpperCase() === 'NAN') obsCto2 = '';
+
+                const textToEval = `${obsGeneral} ${obsCto1} ${obsCto2}`.toUpperCase();
+                
+                // === LÓGICA DE CLASIFICACIÓN TÉCNICA ===
+                let estado = 'OK';
+                
+                // EVALUACIÓN DE ESTATUS MANUAL FORZADO (PRIORIDAD 1)
+                if(eq.Estado_Manual && eq.Estado_Manual !== 'AUTO') {
+                    estado = eq.Estado_Manual;
+                } 
+                else {
+                    // Regla 1: Solo ventilando -> Fuera de Servicio (FAIL)
+                    if (textToEval.includes('VENTILANDO') || textToEval.includes('SOLO VENTILANDO')) {
+                        estado = 'FAIL';
+                    }
+                    // Regla 2: Apagado por Ahorro Energético -> OK, a menos que indique explícitamente falla/FS
+                    else if (textToEval.includes('AHORRO') || textToEval.includes('AHORRO ENERGETICO') || textToEval.includes('APAGADO POR AHORRO')) {
+                        if (textToEval.includes('FALLA') || textToEval.includes('F/S')) {
+                            estado = 'ALERT';
+                        } else {
+                            estado = 'OK';
+                        }
+                    }
+                    else {
+                        // Regla 3: Evaluaciones Cto Único (CRAC/CRAH no inrow) y reglas estandar
+                        const esCracCrahNoInrow = (tipo.toUpperCase().includes('CRAC') || tipo.toUpperCase().includes('CRAH')) && !tipo.toUpperCase().includes('INROW') && !tag.toUpperCase().includes('IRW');
+                        
+                        if (esCracCrahNoInrow && obsCto2 === '') {
+                            if (obsCto1 !== '' && !obsCto1.toUpperCase().includes('OK') && !obsCto1.toUpperCase().includes('NORMAL')) {
+                                if(textToEval.includes('F/S') || textToEval.includes('FALLA COMPRESOR')) estado = 'FAIL';
+                                else estado = 'ALERT';
+                            }
+                        } else {
+                            if (textToEval.includes('F/S') || textToEval.includes('FALLA') || textToEval.includes('FUERA DE SERVICIO')) {
+                                estado = 'FAIL';
+                            } else if (
+                                (obsGeneral !== '' && !obsGeneral.toUpperCase().includes('OK') && !obsGeneral.toUpperCase().includes('NORMAL')) ||
+                                (obsCto1 !== '' && !obsCto1.toUpperCase().includes('OK') && !obsCto1.toUpperCase().includes('NORMAL')) ||
+                                (obsCto2 !== '' && !obsCto2.toUpperCase().includes('OK') && !obsCto2.toUpperCase().includes('NORMAL'))
+                            ) {
+                                estado = 'ALERT';
+                            }
+                        }
+                    }
+                }
+
+                // Categorización para filtros y gráficos (Mantiene lógica anterior)
+                let isCompresor = false, isFuga = false, isMotor = false, isOtro = false;
+                if(textToEval.length > 3 && estado !== 'OK') {
+                    if(textToEval.includes('COMPRESOR')) isCompresor = true;
+                    if(textToEval.includes('FUGA') || textToEval.includes('REFRIGERANTE')) isFuga = true;
+                    if(textToEval.includes('MOTOR') || textToEval.includes('VENTILADOR') || textToEval.includes('EVAPORADOR')) isMotor = true;
+                    if(!isCompresor && !isFuga && !isMotor && !textToEval.includes('AHORRO')) isOtro = true;
+                }
+
+                // Generar fragmento HTML rápido para la columna "Diagnóstico Integral"
+                let dHTML = [];
+                if(obsGeneral) dHTML.push(`<span class="text-slate-300 leading-tight block mb-1"><b class="text-slate-500">Gen:</b> ${obsGeneral}</span>`);
+                if(obsCto1) dHTML.push(`<span class="text-slate-400 leading-tight block mb-1"><b class="text-slate-500">Cto1:</b> ${obsCto1}</span>`);
+                if(obsCto2) dHTML.push(`<span class="text-slate-400 leading-tight block mb-1"><b class="text-slate-500">Cto2:</b> ${obsCto2}</span>`);
+
+                if(dHTML.length === 0 && estado === 'OK') {
+                    dHTML = ['<span class="text-emerald-400/80 italic text-xs"><i class="fa-solid fa-check-circle mr-1"></i> Operativo sin observaciones de sistemas</span>'];
+                } else if(textToEval.includes('AHORRO') && estado === 'OK') {
+                    dHTML = ['<span class="text-blue-400/80 italic text-xs"><i class="fa-solid fa-leaf mr-1"></i> Apagado por programa de ahorro energético</span>'];
+                }
+
+                return {
+                    tag, tipo, ubicacion, marca, modelo, serie, estado,
+                    obsGeneral, obsCto1, obsCto2, textToEval, 
+                    isCompresor, isFuga, isMotor, isOtro,
+                    diagnosticoHTML: dHTML.join(''),
+                    estadoManual: eq.Estado_Manual || 'AUTO',
+                    ue_f1: eq.ue_f1, ue_f2: eq.ue_f2, ue_f3: eq.ue_f3, ue_f4: eq.ue_f4,
+                    ue_motor: eq.ue_motor, ue_control: eq.ue_control
+                };
+            });
+            filteredData = [...baseDeDatos];
+        }
+
+        function poblarFiltrosSala() {
+            const salas = [...new Set(baseDeDatos.map(eq => eq.ubicacion))].sort();
+            const select = document.getElementById('filterRoom');
+            salas.forEach(s => {
+                if(s && s !== '-') {
+                    const opt = document.createElement('option');
+                    opt.value = s;
+                    opt.textContent = s;
+                    select.appendChild(opt);
+                }
+            });
+        }
+
+        function aplicarFiltros() {
+            filteredData = baseDeDatos.filter(eq => {
+                const matchTipo = state.tipo === 'ALL' || eq.tipo === state.tipo;
+                const matchRoom = state.room === 'ALL' || eq.ubicacion === state.room;
+                
+                let matchFalla = true;
+                if (state.falla !== 'ALL') {
+                    if (state.falla === 'COMPRESOR') matchFalla = eq.isCompresor;
+                    if (state.falla === 'FUGA') matchFalla = eq.isFuga;
+                    if (state.falla === 'MOTOR') matchFalla = eq.isMotor;
+                    if (state.falla === 'OTROS') matchFalla = eq.isOtro;
+                }
+
+                let matchSearch = true;
+                if (state.search) {
+                    const str = `${eq.tag} ${eq.tipo} ${eq.ubicacion} ${eq.marca} ${eq.modelo} ${eq.serie} ${eq.textToEval}`.toLowerCase();
+                    matchSearch = str.includes(state.search);
+                }
+
+                return matchTipo && matchRoom && matchFalla && matchSearch;
+            });
+
+            // Sorting
+            filteredData.sort((a, b) => {
+                let valA, valB;
+                if(state.sortBy === 'tag') { valA = a.tag; valB = b.tag; }
+                if(state.sortBy === 'tipo') { valA = a.tipo; valB = b.tipo; }
+                if(state.sortBy === 'ubicacion') { valA = a.ubicacion; valB = b.ubicacion; }
+                if(state.sortBy === 'estado') { 
+                    const rank = { 'FAIL': 3, 'ALERT': 2, 'OK': 1 };
+                    valA = rank[a.estado]; valB = rank[b.estado]; 
+                }
+                
+                if (valA < valB) return state.sortAsc ? -1 : 1;
+                if (valA > valB) return state.sortAsc ? 1 : -1;
+                return 0;
+            });
+
+            renderizarTodo();
+        }
+
+        function renderizarTodo() {
+            renderKPIs();
+            renderTabla();
+            updateStatsAndCharts();
+            document.getElementById('results-count').innerHTML = `Mostrando <strong class="text-white">${filteredData.length}</strong> equipos de ${baseDeDatos.length} totales`;
+        }
+
+        function renderKPIs() {
+            const countTipos = { 'ALL': baseDeDatos.length };
+            const unqTipos = [...new Set(baseDeDatos.map(e => e.tipo))];
+            unqTipos.forEach(t => countTipos[t] = 0);
+            
+            baseDeDatos.forEach(eq => {
+                if(countTipos[eq.tipo] !== undefined) countTipos[eq.tipo]++;
+            });
+
+            const icons = {
+                'ALL': 'fa-layer-group text-slate-300',
+                'CRAC': 'fa-server text-blue-400',
+                'CRAH': 'fa-wind text-cyan-400',
+                'CONFORT': 'fa-house-chimney text-amber-300',
+                'BOMBA': 'fa-water text-indigo-400',
+                'CHILLER': 'fa-snowflake text-sky-300',
+                'TORRE DE ENFRIAMIENTO': 'fa-industry text-slate-400'
+            };
+
+            const container = document.getElementById('kpi-container');
+            container.innerHTML = '';
+
+            const createCard = (id, label, count, icon) => {
+                const isActive = state.tipo === id ? 'active bg-slate-800' : 'bg-slate-800/50 hover:bg-slate-800';
+                return `
+                <div class="card p-3 kpi-card ${isActive}" onclick="setFilterTipo('${id}')">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-[0.70rem] font-bold text-slate-400 uppercase leading-tight tracking-wider">${label}</span>
+                        <i class="fa-solid ${icon} opacity-80"></i>
+                    </div>
+                    <div class="text-2xl font-black text-white mt-1">${count}</div>
+                </div>`;
+            };
+
+            container.innerHTML += createCard('ALL', 'Total Equipos', countTipos['ALL'], icons['ALL']);
+            unqTipos.sort((a,b) => countTipos[b] - countTipos[a]).forEach(t => {
+                container.innerHTML += createCard(t, t, countTipos[t], icons[t] || 'fa-box');
+            });
+        }
+
+        function renderTabla() {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = '';
+
+            if (filteredData.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-12 text-center text-slate-500 italic bg-slate-900/30">Ningún equipo coincide con los criterios aplicados.</td></tr>`;
+                return;
+            }
+
+            // Mapeo seguro a la variable global baseDeDatos para onclick (usar ID real)
+            filteredData.forEach((eq, idx) => {
+                // Encontrar su index global real
+                const globalIdx = baseDeDatos.findIndex(b => b.tag === eq.tag && b.ubicacion === eq.ubicacion);
+                
+                let statusBadge = '';
+                let borderLeft = '';
+                if(eq.estado === 'OK') {
+                    statusBadge = '<span class="status-badge badge-ok shadow-sm"><i class="fa-solid fa-check mr-1"></i> OK</span>';
+                    borderLeft = 'border-l-4 border-l-emerald-500';
+                } else if(eq.estado === 'ALERT') {
+                    statusBadge = '<span class="status-badge badge-alert shadow-sm"><i class="fa-solid fa-triangle-exclamation mr-1"></i> ALERTA</span>';
+                    borderLeft = 'border-l-4 border-l-amber-500';
+                } else {
+                    statusBadge = '<span class="status-badge badge-danger shadow-sm"><i class="fa-solid fa-xmark mr-1"></i> F/S</span>';
+                    borderLeft = 'border-l-4 border-l-rose-500';
+                }
+
+                tbody.innerHTML += `
+                <tr class="eq-row border-b border-slate-700/50 ${borderLeft}" onclick="openModal(${globalIdx})">
+                    <td class="px-6 py-4 font-bold text-white tracking-wide">${eq.tag}</td>
+                    <td class="px-6 py-4 text-slate-300 font-medium text-[0.7rem] uppercase tracking-wider">
+                        <div class="bg-slate-700/50 inline-block px-2.5 py-1 rounded border border-slate-600">${eq.tipo}</div>
+                    </td>
+                    <td class="px-6 py-4 text-slate-300">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-location-dot text-slate-500 text-xs"></i>
+                            <span class="truncate max-w-[150px]" title="${eq.ubicacion}">${eq.ubicacion}</span>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4">
+                        <div class="font-semibold text-slate-200 text-[0.8rem]">${eq.marca}</div>
+                        <div class="text-[0.65rem] text-slate-500 font-mono tracking-widest mt-1" title="Modelo: ${eq.modelo} | S/N: ${eq.serie}">${eq.modelo}</div>
+                    </td>
+                    <td class="px-6 py-4 text-center">${statusBadge}</td>
+                    <td class="px-6 py-4 text-[0.75rem] whitespace-normal min-w-[300px]">
+                        <div class="bg-slate-900/50 p-2.5 rounded border border-slate-700/50">
+                            ${eq.diagnosticoHTML}
+                        </div>
+                    </td>
+                </tr>`;
+            });
+        }
+
+        
+        // -------------------------
+        // LÓGICA DE UNIDAD CONDENSADORA (UE)
+        // -------------------------
+        const statusColors = ['text-gray-500', 'text-green-500', 'text-yellow-500', 'text-red-500'];
+
+        function cycleStatus(fanId) {
+            const fanElement = document.getElementById(fanId);
+            let currentIndex = statusColors.findIndex(color => fanElement.classList.contains(color));
+            if(currentIndex !== -1) fanElement.classList.remove(statusColors[currentIndex]);
+            else currentIndex = 0;
+            const nextIndex = (currentIndex + 1) % statusColors.length;
+            fanElement.classList.add(statusColors[nextIndex]);
+        }
+        
+        function getFanColorClass(fanId) {
+            const fanElement = document.getElementById(fanId);
+            return statusColors.find(color => fanElement.classList.contains(color)) || 'text-gray-500';
+        }
+        
+        function setFanColorClass(fanId, colorClass) {
+            const fanElement = document.getElementById(fanId);
+            statusColors.forEach(c => fanElement.classList.remove(c));
+            fanElement.classList.add(colorClass);
+        }
+
+        // -------------------------
+        // MODAL LOGIC (FICHA TÉCNICA Y EDICION)
+        // -------------------------
+        function openModal(globalIdx) {
+            const eq = baseDeDatos[globalIdx];
+            if(!eq) return;
+            
+            currentEditingGlobalIdx = globalIdx;
+
+            document.getElementById('modalTag').innerText = eq.tag;
+            document.getElementById('modalTipo').innerText = `Familia / Clase: ${eq.tipo}`;
+            document.getElementById('modalUbicacion').innerText = eq.ubicacion;
+            document.getElementById('modalMarca').innerText = eq.marca;
+            document.getElementById('modalModelo').innerText = eq.modelo;
+            document.getElementById('modalSerie').innerText = eq.serie || 'NO REGISTRADO';
+            
+            // Setear valor de estatus
+            document.getElementById('editEstadoManual').value = eq.estadoManual;
+
+            // Cargar estado de Unidad Condensadora (UE)
+            setFanColorClass('fan1', eq.ue_f1 || 'text-gray-500');
+            setFanColorClass('fan2', eq.ue_f2 || 'text-gray-500');
+            setFanColorClass('fan3', eq.ue_f3 || 'text-gray-500');
+            setFanColorClass('fan4', eq.ue_f4 || 'text-gray-500');
+            document.getElementById('ueMotor').value = eq.ue_motor || '';
+            document.getElementById('ueControl').value = eq.ue_control || '';
+
+            // Icon by Type
+            const iconEl = document.getElementById('modalIcon');
+            const icons = {
+                'CRAC': 'fa-server text-blue-400',
+                'CRAH': 'fa-wind text-cyan-400',
+                'CONFORT': 'fa-house-chimney text-amber-300',
+                'BOMBA': 'fa-water text-indigo-400',
+                'CHILLER': 'fa-snowflake text-sky-300',
+                'TORRE DE ENFRIAMIENTO': 'fa-industry text-slate-400'
+            };
+            const iconClass = icons[eq.tipo] || 'fa-box text-slate-400';
+            iconEl.innerHTML = `<i class="fa-solid ${iconClass}"></i>`;
+            iconEl.className = `w-12 h-12 rounded-lg bg-slate-700/50 border border-slate-600 flex items-center justify-center text-xl shadow-inner`;
+
+            // Diagnostic Blocks - AHORA SON TEXTAREAS EDITABLES
+            const blocksContainer = document.getElementById('modalDiagnosticBlocks');
+            blocksContainer.innerHTML = '';
+            
+            const createEditableBlock = (title, id, text, isNA = false) => {
+                let opacityClass = isNA ? 'opacity-50 pointer-events-none' : 'focus-within:border-blue-500 hover:border-slate-500';
+                return `
+                <div class="border border-slate-700 bg-slate-800/30 rounded-lg p-3 flex flex-col h-full shadow-sm transition-colors ${opacityClass}">
+                    <h5 class="text-[11px] font-bold uppercase tracking-wider text-slate-300 mb-2 border-b border-slate-700/50 pb-1 flex items-center gap-1">
+                        <i class="fa-solid fa-pen-to-square opacity-70"></i> ${title}
+                    </h5>
+                    <textarea id="${id}" class="w-full bg-transparent text-sm text-slate-200 resize-none outline-none flex-grow h-28 custom-scrollbar" ${isNA ? 'disabled' : ''} placeholder="${isNA ? 'No aplica' : 'Ingrese observaciones...'}">${text}</textarea>
+                </div>`;
+            };
+
+            blocksContainer.innerHTML += createEditableBlock('Observación General', 'editGen', eq.obsGeneral);
+            blocksContainer.innerHTML += createEditableBlock('Línea Frig. 1 (Cto 1)', 'editC1', eq.obsCto1);
+            
+            if(eq.obsCto2 === '' && (eq.tipo.toUpperCase().includes('CRAC') || eq.tipo.toUpperCase().includes('CRAH')) && !eq.tag.toUpperCase().includes('IRW')) {
+                blocksContainer.innerHTML += createEditableBlock('Línea Frig. 2 (Cto 2)', 'editC2', '', true);
+            } else {
+                blocksContainer.innerHTML += createEditableBlock('Línea Frig. 2 (Cto 2)', 'editC2', eq.obsCto2);
+            }
+
+            document.getElementById('modalOverlay').classList.remove('hidden');
+        }
+
+        window.closeModal = function() {
+            document.getElementById('modalOverlay').classList.add('hidden');
+            currentEditingGlobalIdx = null;
+        }
+        
+        window.saveModalChanges = function() {
+            if(currentEditingGlobalIdx === null) return;
+            
+            // Actualizar datos en RAW_DATA directamente (persistencia local simulada)
+            RAW_DATA[currentEditingGlobalIdx]["General"] = document.getElementById('editGen').value.trim() || 'N/A';
+            RAW_DATA[currentEditingGlobalIdx]["Cto 1"] = document.getElementById('editC1').value.trim() || 'N/A';
+            
+            const editC2 = document.getElementById('editC2');
+            if(editC2 && !editC2.disabled) {
+                RAW_DATA[currentEditingGlobalIdx]["Cto 2"] = editC2.value.trim() || 'N/A';
+            }
+
+            RAW_DATA[currentEditingGlobalIdx]["Estado_Manual"] = document.getElementById('editEstadoManual').value;
+            
+            // Guardar estado de Unidad Condensadora (UE)
+            RAW_DATA[currentEditingGlobalIdx]["ue_f1"] = getFanColorClass('fan1');
+            RAW_DATA[currentEditingGlobalIdx]["ue_f2"] = getFanColorClass('fan2');
+            RAW_DATA[currentEditingGlobalIdx]["ue_f3"] = getFanColorClass('fan3');
+            RAW_DATA[currentEditingGlobalIdx]["ue_f4"] = getFanColorClass('fan4');
+            RAW_DATA[currentEditingGlobalIdx]["ue_motor"] = document.getElementById('ueMotor').value;
+            RAW_DATA[currentEditingGlobalIdx]["ue_control"] = document.getElementById('ueControl').value;
+
+            // Reprocesar toda la interfaz
+            procesarDatos();
+            aplicarFiltros();
+            closeModal();
+        }
+        
+        // -------------------------
+        // NUEVO ACTIVO LOGIC
+        // -------------------------
+        window.openAddAssetModal = function() {
+            // Limpiar formulario
+            document.getElementById('newTag').value = '';
+            document.getElementById('newUbicacion').value = '';
+            document.getElementById('newMarca').value = '';
+            document.getElementById('newModelo').value = '';
+            document.getElementById('newSerie').value = '';
+            document.getElementById('modalAddAsset').classList.remove('hidden');
+        }
+
+        window.closeAddAssetModal = function() {
+            document.getElementById('modalAddAsset').classList.add('hidden');
+        }
+
+        window.saveNewAsset = function() {
+            const tag = document.getElementById('newTag').value.trim();
+            const ubi = document.getElementById('newUbicacion').value.trim();
+            
+            if(!tag || !ubi) {
+                alert("Por favor, ingrese al menos el TAG y la Ubicación.");
+                return;
+            }
+
+            const nuevo = {
+                "ítem": RAW_DATA.length + 1,
+                "TAG NUEVO": tag.toUpperCase(),
+                "SALA/UBICACIÓN": ubi.toUpperCase(),
+                "MARCA": document.getElementById('newMarca').value.trim() || '-',
+                "MODELO": document.getElementById('newModelo').value.trim() || '-',
+                "N° DE SERIE Act": document.getElementById('newSerie').value.trim() || '-',
+                "Tipo": document.getElementById('newTipo').value,
+                "General": "N/A",
+                "Cto 1": "N/A",
+                "Cto 2": "N/A",
+                "Estado_Manual": "AUTO"
+            };
+
+            RAW_DATA.push(nuevo);
+            procesarDatos();
+            poblarFiltrosSala(); // Refrescar salas por si hay una nueva
+            aplicarFiltros();
+            closeAddAssetModal();
+        }
+
+
+        function updateStatsAndCharts() {
+            let ok = 0, alert = 0, fail = 0;
+            let f_compresor = 0, f_fuga = 0, f_motor = 0, f_otro = 0;
+
+            filteredData.forEach(eq => {
+                if(eq.estado === 'OK') ok++;
+                if(eq.estado === 'ALERT') alert++;
+                if(eq.estado === 'FAIL') fail++;
+
+                if(eq.isCompresor) f_compresor++;
+                if(eq.isFuga) f_fuga++;
+                if(eq.isMotor) f_motor++;
+                if(eq.isOtro) f_otro++;
+            });
+
+            document.getElementById('stat-ok').innerText = ok;
+            document.getElementById('stat-alert').innerText = alert;
+            document.getElementById('stat-fail').innerText = fail;
+
+            Chart.defaults.color = '#94a3b8';
+            Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+
+            const ctxStatus = document.getElementById('chartStatus').getContext('2d');
+            if(chartStatusInstance) chartStatusInstance.destroy();
+            
+            let dOk = ok, dAlert = alert, dFail = fail;
+            if(ok===0 && alert===0 && fail===0) dOk = 0.01;
+
+            chartStatusInstance = new Chart(ctxStatus, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Operativos (OK)', 'En Alerta', 'Fuera de Servicio'],
+                    datasets: [{
+                        data: [dOk, dAlert, dFail],
+                        backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+                        borderWidth: 0,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false, cutout: '75%',
+                    plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(15, 23, 42, 0.9)', padding: 10, cornerRadius: 8 } }
+                }
+            });
+
+            const ctxFaults = document.getElementById('chartFaults').getContext('2d');
+            if(chartFaultsInstance) chartFaultsInstance.destroy();
+
+            chartFaultsInstance = new Chart(ctxFaults, {
+                type: 'bar',
+                data: {
+                    labels: ['Motores / Vents.', 'Fugas / Refrig.', 'Compresores', 'Otras Observ.'],
+                    datasets: [{
+                        label: 'Cant. Equipos',
+                        data: [f_motor, f_fuga, f_compresor, f_otro],
+                        backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                        borderRadius: 4, barThickness: 24
+                    }]
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    scales: { x: { grid: { color: '#334155' }, ticks: { stepSize: 1 } }, y: { grid: { display: false } } },
+                    plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(15, 23, 42, 0.9)' } }
+                }
+            });
+        }
+
+        // -------------------------
+        // EXPORT TO EXCEL LOGIC
+        // -------------------------
+        window.exportToExcel = function() {
+            let csvContent = "TAG;TIPO/CLASE;UBICACION;MARCA;MODELO;NUMERO SERIE;ESTADO OPERACIONAL;OBSERVACION GENERAL;CTO 1;CTO 2\n";
+            
+            filteredData.forEach(eq => {
+                const clean = (str) => {
+                    if (!str) return "";
+                    let cleanStr = str.replace(/"/g, '""');
+                    cleanStr = cleanStr.replace(/\n/g, ' ');
+                    cleanStr = cleanStr.replace(/;/g, ','); 
+                    return `"${cleanStr}"`;
+                };
+
+                const row = [
+                    clean(eq.tag),
+                    clean(eq.tipo),
+                    clean(eq.ubicacion),
+                    clean(eq.marca),
+                    clean(eq.modelo),
+                    clean(eq.serie),
+                    clean(eq.estado),
+                    clean(eq.obsGeneral),
+                    clean(eq.obsCto1),
+                    clean(eq.obsCto2)
+                ];
+                csvContent += row.join(";") + "\n";
+            });
+
+            const BOM = "\uFEFF"; 
+            const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", "Base_Datos_Infraestructura_DCSM.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        window.setFilterTipo = function(tipo) { state.tipo = tipo; aplicarFiltros(); }
+        window.sortData = function(column) { state.sortAsc = state.sortBy === column ? !state.sortAsc : true; state.sortBy = column; aplicarFiltros(); }
+        
+        window.resetFilters = function() {
+            state = { tipo: 'ALL', room: 'ALL', falla: 'ALL', search: '', sortBy: 'tag', sortAsc: true };
+            document.getElementById('searchInput').value = '';
+            document.getElementById('filterRoom').value = 'ALL';
+            document.getElementById('filterFault').value = 'ALL';
+            aplicarFiltros();
+        }
+
+    </script>
+</body>
+</html>
