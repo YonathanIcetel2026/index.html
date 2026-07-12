@@ -229,8 +229,8 @@
                 // --- ¡ATENCIÓN! VERIFICA EL NOMBRE DE TUS COLUMNAS AQUÍ ---
                 const { error } = await db
                     .from('Equipos')
-                    .update({ 'Cto 1': cto1, 'Cto 2': cto2 })
-                    .eq('TAG NUEVO', tag); 
+                //    .update({ 'Cto 1': cto1, 'Cto 2': cto2 })
+                //    .eq('TAG NUEVO', tag); 
                 // --------------------------------------------------------
 
                 if (error) throw error;
