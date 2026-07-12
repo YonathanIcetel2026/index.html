@@ -6,8 +6,6 @@
     <title>Infraestructura de Climatización DCSM</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Supabase JS -->
@@ -29,14 +27,13 @@
     <style>
         body { background-color: #0f172a; color: #f8fafc; font-family: 'Segoe UI', system-ui, sans-serif; }
         .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; transition: all 0.2s; }
-        .card:hover { border-color: #475569; }
         
         .status-badge { padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
         .badge-ok { background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
         .badge-alert { background-color: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
         .badge-danger { background-color: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
         
-        .eq-row:hover { background-color: rgba(255, 255, 255, 0.05); cursor: pointer; }
+        .eq-row:hover { background-color: rgba(255, 255, 255, 0.05); }
         
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
@@ -62,9 +59,14 @@
             <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-300 uppercase tracking-wide">
                 <i class="fa-solid fa-server mr-2 text-blue-400"></i> Infraestructura de Climatización DCSM
             </h1>
-            <p class="text-slate-400 mt-1 uppercase text-sm tracking-wider">Sistema de Análisis Operacional & Base de Datos Supabase</p>
+            <p class="text-slate-400 mt-1 uppercase text-sm tracking-wider" id="mode-subtitle">
+                Sistema de Análisis Operacional - <span class="text-amber-400 font-bold">MODO LECTURA</span>
+            </p>
         </div>
         <div class="flex gap-2">
+            <button id="btnAuth" onclick="toggleEditorMode()" title="Cambiar Modo" class="w-auto px-4 h-10 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-600 transition flex items-center justify-center shadow-sm font-medium text-sm">
+                <i class="fa-solid fa-lock mr-2" id="iconAuth"></i> <span id="textAuth">Modo Lectura</span>
+            </button>
             <button onclick="fetchEquipos()" title="Actualizar Datos" class="w-10 h-10 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-600 transition flex items-center justify-center shadow-sm">
                 <i class="fa-solid fa-rotate-right"></i>
             </button>
@@ -80,7 +82,6 @@
             <div class="relative w-full md:w-64">
                 <select id="filterRoom" onchange="aplicarFiltros()" class="w-full bg-slate-900 border border-slate-600 text-slate-300 rounded-lg pl-3 pr-10 py-2 focus:outline-none focus:border-blue-500 transition text-sm font-medium">
                     <option value="ALL">Todas las Ubicaciones / Salas</option>
-                    <!-- Se llena automáticamente con JS -->
                 </select>
             </div>
 
@@ -91,26 +92,30 @@
         </div>
     </div>
 
-    <div class="text-sm text-slate-400 mb-2 px-1 flex justify-between">
+    <div class="text-sm mb-2 px-1 flex justify-between items-center">
         <span id="results-count" class="font-medium text-slate-300">Conectando a la base de datos...</span>
+        <span id="mode-warning" class="text-amber-400 text-xs italic font-medium bg-amber-400/10 px-2 py-1 rounded border border-amber-400/20">
+            <i class="fa-solid fa-eye mr-1"></i> Mostrando solo equipos con observaciones
+        </span>
     </div>
 
     <!-- Tabla Detallada -->
     <div class="card overflow-hidden">
         <div class="table-container">
-            <table class="w-full text-left text-sm whitespace-nowrap">
+            <table class="w-full text-left text-sm whitespace-nowrap" id="mainTable">
                 <thead class="text-xs text-slate-400 uppercase bg-slate-800/80">
-                    <tr>
+                    <tr id="table-head-row">
                         <th class="px-6 py-4">TAG</th>
                         <th class="px-6 py-4">Ubicación</th>
                         <th class="px-6 py-4">Marca / Modelo</th>
                         <th class="px-6 py-4 text-center">Estado</th>
                         <th class="px-6 py-4">Observaciones</th>
+                        <!-- La columna de acciones se añade dinámicamente con JS -->
                     </tr>
                 </thead>
                 <tbody id="table-body" class="divide-y divide-slate-700/50">
                     <tr>
-                        <td colspan="5" class="px-6 py-8 text-center text-slate-500">
+                        <td colspan="6" class="px-6 py-8 text-center text-slate-500">
                             <i class="fa-solid fa-circle-notch fa-spin text-2xl mb-2 text-blue-500"></i>
                             <p>Cargando información desde Supabase...</p>
                         </td>
@@ -120,7 +125,7 @@
         </div>
     </div>
 
-    <!-- SCRIPT PRINCIPAL DE SUPABASE -->
+    <!-- SCRIPT PRINCIPAL -->
     <script>
         // 1. Configuración de Supabase
         const { createClient } = supabase;
@@ -129,48 +134,129 @@
         const db = createClient(supabaseUrl, supabaseKey);
 
         let RAW_DATA = [];
+        let isEditorMode = false; // El estado inicial es Modo Lectura
 
-        // 2. Función para obtener los datos
+        // 2. Control de Roles (Modo Editor / Lectura)
+        function toggleEditorMode() {
+            if (isEditorMode) {
+                // Si está en editor, lo pasamos a lectura directamente
+                isEditorMode = false;
+                alert("Has cerrado sesión. Modo Lectura activado.");
+            } else {
+                // Si está en lectura, pedimos la contraseña
+                const pass = prompt("Ingrese la clave de autorización:");
+                if (pass === "DCSM*00*") {
+                    isEditorMode = true;
+                    alert("Acceso concedido. Modo Editor activado.");
+                } else if (pass !== null) {
+                    alert("Clave incorrecta. Acceso denegado.");
+                }
+            }
+            actualizarUIModo();
+            aplicarFiltros();
+        }
+
+        function actualizarUIModo() {
+            const btnAuth = document.getElementById('btnAuth');
+            const iconAuth = document.getElementById('iconAuth');
+            const textAuth = document.getElementById('textAuth');
+            const modeSubtitle = document.getElementById('mode-subtitle');
+            const modeWarning = document.getElementById('mode-warning');
+            const headRow = document.getElementById('table-head-row');
+
+            // Limpiar columna de acciones si existe
+            const thAcciones = document.getElementById('th-acciones');
+            if (thAcciones) thAcciones.remove();
+
+            if (isEditorMode) {
+                btnAuth.className = "w-auto px-4 h-10 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg border border-emerald-500 transition flex items-center justify-center shadow-sm font-bold text-sm";
+                iconAuth.className = "fa-solid fa-unlock-keyhole mr-2";
+                textAuth.innerText = "Modo Editor";
+                modeSubtitle.innerHTML = 'Sistema de Análisis Operacional - <span class="text-emerald-400 font-bold">MODO EDITOR (ACCESO TOTAL)</span>';
+                modeWarning.style.display = 'none'; // Ocultar advertencia de filtro
+                
+                // Añadir columna de acciones a la tabla
+                headRow.innerHTML += '<th id="th-acciones" class="px-6 py-4 text-center">Acciones</th>';
+            } else {
+                btnAuth.className = "w-auto px-4 h-10 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-600 transition flex items-center justify-center shadow-sm font-medium text-sm";
+                iconAuth.className = "fa-solid fa-lock mr-2";
+                textAuth.innerText = "Modo Lectura";
+                modeSubtitle.innerHTML = 'Sistema de Análisis Operacional - <span class="text-amber-400 font-bold">MODO LECTURA</span>';
+                modeWarning.style.display = 'block'; // Mostrar advertencia
+            }
+        }
+
+        // 3. Obtener Datos
         async function fetchEquipos() {
             try {
-                document.getElementById('table-body').innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-500"><i class="fa-solid fa-circle-notch fa-spin text-2xl mb-2 text-blue-500"></i><p>Actualizando datos...</p></td></tr>`;
+                document.getElementById('table-body').innerHTML = `<tr><td colspan="6" class="px-6 py-8 text-center text-slate-500"><i class="fa-solid fa-circle-notch fa-spin text-2xl mb-2 text-blue-500"></i><p>Actualizando datos...</p></td></tr>`;
                 
-                // --- ¡ATENCIÓN! CAMBIA EL TEXTO DE ABAJO POR EL NOMBRE DE TU TABLA ---
+                // --- ¡ATENCIÓN! CAMBIA ESTO POR EL NOMBRE DE TU TABLA ---
                 const { data, error } = await db
                     .from(Climatizacion-DCSM) 
                     .select('*');
-                // --------------------------------------------------------------------
+                // --------------------------------------------------------
 
                 if (error) throw error;
 
                 if (data) {
                     RAW_DATA = data;
-                    renderizarTabla(RAW_DATA);
+                    actualizarUIModo();
                     popularFiltroSalas(RAW_DATA);
+                    aplicarFiltros();
                 }
 
             } catch (error) {
                 console.error("Error al obtener datos:", error.message);
-                document.getElementById('results-count').innerHTML = `<span class="text-rose-500"><i class="fa-solid fa-triangle-exclamation"></i> Error conectando a Supabase. Revisa el nombre de la tabla.</span>`;
-                document.getElementById('table-body').innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-rose-500">Fallo en la conexión. Verifica la consola.</td></tr>`;
+                document.getElementById('results-count').innerHTML = `<span class="text-rose-500"><i class="fa-solid fa-triangle-exclamation"></i> Error conectando a Supabase.</span>`;
             }
         }
 
-        // 3. Renderizar la Tabla
+        // 4. Edición en Base de Datos (Solo para Modo Editor)
+        async function editarCircuitos(tag) {
+            if (!isEditorMode) return;
+
+            const cto1 = prompt(`Actualizar estado del Cto 1 para el equipo ${tag}:`, "Operativo");
+            if (cto1 === null) return; // Cancelado por el usuario
+            
+            const cto2 = prompt(`Actualizar estado del Cto 2 para el equipo ${tag}:`, "Operativo");
+            if (cto2 === null) return; // Cancelado por el usuario
+
+            try {
+                // Mostrar estado de guardado
+                document.getElementById('results-count').innerHTML = `<span class="text-blue-400"><i class="fa-solid fa-spinner fa-spin"></i> Guardando cambios en Supabase...</span>`;
+
+                // --- ¡ATENCIÓN! VERIFICA EL NOMBRE DE TUS COLUMNAS AQUÍ ---
+                const { error } = await db
+                    .from('nombre_de_tu_tabla')
+                    .update({ 'Cto 1': cto1, 'Cto 2': cto2 })
+                    .eq('TAG NUEVO', tag); 
+                // --------------------------------------------------------
+
+                if (error) throw error;
+
+                alert(`Los circuitos del equipo ${tag} fueron actualizados exitosamente.`);
+                fetchEquipos(); // Recargar datos para ver los cambios
+
+            } catch (err) {
+                alert("Error al actualizar la base de datos: " + err.message);
+                document.getElementById('results-count').innerText = `Error al guardar.`;
+            }
+        }
+
+        // 5. Renderizar Tabla
         function renderizarTabla(datos) {
             const tbody = document.getElementById('table-body');
             tbody.innerHTML = '';
             
-            document.getElementById('results-count').innerText = `Mostrando ${datos.length} equipos`;
+            document.getElementById('results-count').innerText = `Mostrando ${datos.length} equipos en pantalla`;
 
             if (datos.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">No se encontraron registros.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">No se encontraron registros para los filtros actuales.</td></tr>`;
                 return;
             }
 
             datos.forEach(equipo => {
-                // Ajusta los nombres de las propiedades según las columnas reales en tu Supabase
-                // Ejemplo: equipo.tag, equipo.ubicacion, equipo.estado, etc.
                 const tag = equipo['TAG NUEVO'] || equipo.tag || 'N/A';
                 const ubicacion = equipo['SALA/UBICACIÓN'] || equipo.ubicacion || 'N/A';
                 const marca = equipo.Marca || equipo.marca || 'N/A';
@@ -189,9 +275,10 @@
                     iconoEstado = '<i class="fa-solid fa-xmark-circle"></i>';
                 }
 
-                const tr = document.createElement('tr');
+                let tr = document.createElement('tr');
                 tr.className = 'eq-row';
-                tr.innerHTML = `
+                
+                let htmlRow = `
                     <td class="px-6 py-4 font-medium text-blue-400">${tag}</td>
                     <td class="px-6 py-4 text-slate-300">${ubicacion}</td>
                     <td class="px-6 py-4 text-slate-400">${marca} <span class="text-xs ml-1 opacity-70">${modelo}</span></td>
@@ -200,13 +287,26 @@
                     </td>
                     <td class="px-6 py-4 text-slate-400 text-xs truncate max-w-xs" title="${observaciones}">${observaciones}</td>
                 `;
+
+                // Agregar botón de acción si es modo editor
+                if (isEditorMode) {
+                    htmlRow += `
+                    <td class="px-6 py-4 text-center">
+                        <button onclick="editarCircuitos('${tag}')" class="text-blue-400 hover:text-white bg-blue-900/30 hover:bg-blue-600 px-3 py-1 rounded border border-blue-800 transition">
+                            <i class="fa-solid fa-pen-to-square mr-1"></i> Ctos
+                        </button>
+                    </td>`;
+                }
+
+                tr.innerHTML = htmlRow;
                 tbody.appendChild(tr);
             });
         }
 
-        // 4. Llenar el select de ubicaciones automáticamente
+        // 6. Popular Filtro Salas
         function popularFiltroSalas(datos) {
             const select = document.getElementById('filterRoom');
+            const valorActual = select.value;
             const salasUnicas = new Set();
             
             datos.forEach(eq => {
@@ -216,7 +316,6 @@
                 }
             });
 
-            // Mantener solo la opción "ALL" y luego agregar las nuevas
             select.innerHTML = '<option value="ALL">Todas las Ubicaciones / Salas</option>';
             Array.from(salasUnicas).sort().forEach(sala => {
                 const option = document.createElement('option');
@@ -224,9 +323,10 @@
                 option.textContent = sala;
                 select.appendChild(option);
             });
+            select.value = valorActual; // Mantener selección previa si existe
         }
 
-        // 5. Aplicar Filtros Básicos
+        // 7. Aplicar Filtros y Reglas de Modo
         function aplicarFiltros() {
             const salaFiltro = document.getElementById('filterRoom').value;
             const textoBuscado = document.getElementById('searchInput').value.toLowerCase();
@@ -235,25 +335,35 @@
                 const tag = (equipo['TAG NUEVO'] || equipo.tag || '').toLowerCase();
                 const sala = equipo['SALA/UBICACIÓN'] || equipo.ubicacion || '';
                 const marca = (equipo.Marca || equipo.marca || '').toLowerCase();
+                const obs = (equipo.Observaciones || equipo.observaciones || '').trim().toLowerCase();
                 
+                // LÓGICA DE MODO LECTURA: Filtrar solo si no somos editores
+                let cumpleModoLectura = true;
+                if (!isEditorMode) {
+                    // Solo pasamos los que tengan una observación real
+                    cumpleModoLectura = (obs !== '' && obs !== 'sin observaciones' && obs !== 'n/a' && obs !== 'ninguna' && obs !== 'ok');
+                }
+
                 const cumpleSala = (salaFiltro === 'ALL') || (sala === salaFiltro);
                 const cumpleTexto = tag.includes(textoBuscado) || marca.includes(textoBuscado);
 
-                return cumpleSala && cumpleTexto;
+                return cumpleModoLectura && cumpleSala && cumpleTexto;
             });
 
             renderizarTabla(datosFiltrados);
         }
 
-        // 6. Resetear Filtros
         function resetFilters() {
             document.getElementById('filterRoom').value = 'ALL';
             document.getElementById('searchInput').value = '';
-            renderizarTabla(RAW_DATA);
+            aplicarFiltros();
         }
 
-        // Iniciar la carga apenas se abra la página
-        document.addEventListener('DOMContentLoaded', fetchEquipos);
+        // Iniciar
+        document.addEventListener('DOMContentLoaded', () => {
+            actualizarUIModo(); // Configurar la vista visual inicial
+            fetchEquipos();     // Traer datos
+        });
     </script>
 </body>
 </html>
